@@ -62,10 +62,14 @@ test("full game: join, answer, early reveal, scores, final", async () => {
   await eng.start();
   assert.equal(eng.state.phase, "question");
   assert.equal(eng.state.totalRounds, 2);
-  // Public state must not leak the answer
+  // Public state must not leak the answer, nor the artist of any choice
   for (const b of broadcasts) {
     assert.ok(!JSON.stringify(b.question ?? {}).includes('"answer"'));
-    if (b.phase === "question") assert.equal(b.reveal, undefined);
+    if (b.phase === "question") {
+      assert.equal(b.reveal, undefined);
+      assert.ok(b.question!.choices.every((c) => c.artist === undefined));
+      assert.equal(b.question!.lockMs, 3000);
+    }
   }
 
   const qid = eng.state.question!.id;
@@ -79,13 +83,14 @@ test("full game: join, answer, early reveal, scores, final", async () => {
   assert.equal(eng.state.players.host.score, 0);
   assert.equal(eng.state.reveal!.answer, 1);
   assert.equal(eng.state.reveal!.picks.p1.gain, 1000);
+  assert.equal(eng.state.reveal!.choices![1].artist, "A", "artists shown after the reveal");
 
   timers.advance(REVEAL_MS);
   assert.equal(eng.state.phase, "question");
   assert.equal(eng.state.round, 1);
 
   // Nobody answers: timeout reveal
-  timers.advance(15000 + GRACE_MS);
+  timers.advance(3000 + 15000 + GRACE_MS);
   assert.equal(eng.state.phase, "reveal");
   assert.equal(eng.state.players.p1.streak, 0);
   timers.advance(REVEAL_MS);
@@ -146,9 +151,21 @@ test("host refresh resumes from snapshot", async () => {
   );
   assert.equal(eng2.state.phase, "question");
   eng2.answer({ playerId: "p1", questionId: eng2.state.question!.id, choice: 1, ms: 0 });
-  timers.advance(15000 + GRACE_MS);
+  timers.advance(3000 + 15000 + GRACE_MS);
   assert.equal(eng2.state.phase, "reveal");
   assert.equal(eng2.state.players.p1.score, 1000);
+});
+
+test("listen time 0 means no lock; timeout is listen + answer time", async () => {
+  const { eng, timers } = setup(1);
+  eng.syncMembers([{ id: "host", name: "h" }, { id: "p", name: "p" }]);
+  eng.updateSettings({ ...eng.state.settings, listenSeconds: 0, roundSeconds: 10 });
+  await eng.start();
+  assert.equal(eng.state.question!.lockMs, 0);
+  timers.advance(10000 + GRACE_MS - 1);
+  assert.equal(eng.state.phase, "question");
+  timers.advance(1);
+  assert.equal(eng.state.phase, "reveal");
 });
 
 test("play again resets scores", async () => {

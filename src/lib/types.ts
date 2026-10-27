@@ -11,7 +11,8 @@ export type Track = {
   storeUrl?: string;
 };
 
-export type Choice = { title: string; artist: string };
+/** Players only ever see the title, so the artist's voice can't give the answer away. */
+export type Choice = { title: string; artist?: string };
 
 /** A question as the host keeps it (includes the answer). */
 export type HostQuestion = {
@@ -30,6 +31,8 @@ export type GameSettings = {
   source: SongSource;
   rounds: number;
   roundSeconds: number;
+  /** Seconds of listening before the choices appear (0 = show immediately). */
+  listenSeconds: number;
 };
 
 export type PlayerState = {
@@ -47,13 +50,15 @@ export type PublicQuestion = {
   previewUrl: string;
   startAt: number;
   choices: Choice[];
-  durationMs: number;
+  lockMs: number; // listen-only time before choices appear
+  durationMs: number; // answering time after the choices appear
 };
 
 export type Reveal = {
   questionId: string;
   answer: number;
   track: Track;
+  choices?: Choice[]; // with artists, shown after the reveal
   picks: Record<string, { choice: number; gain: number; ms: number }>;
 };
 

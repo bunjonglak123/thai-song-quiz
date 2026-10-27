@@ -35,6 +35,7 @@ export const DEFAULT_SETTINGS: GameSettings = {
   source: { kind: "chart", size: 100 },
   rounds: 10,
   roundSeconds: 15,
+  listenSeconds: 3,
 };
 
 export class HostEngine {
@@ -77,7 +78,8 @@ export class HostEngine {
     if (p === "loading") {
       this.commit({ phase: "lobby", notice: "การโหลดเพลงถูกขัดจังหวะ กดเริ่มเกมใหม่อีกครั้ง" });
     } else if (p === "question") {
-      this.arm(() => this.reveal(), (this.state.question?.durationMs ?? 15000) + GRACE_MS);
+      const q = this.state.question;
+      this.arm(() => this.reveal(), (q?.lockMs ?? 0) + (q?.durationMs ?? 15000) + GRACE_MS);
     } else if (p === "reveal") {
       this.arm(() => this.next(), 2500);
     }
@@ -161,15 +163,25 @@ export class HostEngine {
   private ask(i: number) {
     const q = this.questions[i];
     const durationMs = this.state.settings.roundSeconds * 1000;
+    const lockMs = (this.state.settings.listenSeconds ?? 3) * 1000;
     this.picks[q.id] = {};
     this.commit({
       phase: "question",
       round: i,
       answered: [],
       reveal: undefined,
-      question: { id: q.id, index: i, previewUrl: q.track.previewUrl, startAt: q.startAt, choices: q.choices, durationMs },
+      question: {
+        id: q.id,
+        index: i,
+        previewUrl: q.track.previewUrl,
+        startAt: q.startAt,
+        // Titles only: artist names stay on the host until the reveal.
+        choices: q.choices.map((c) => ({ title: c.title })),
+        lockMs,
+        durationMs,
+      },
     });
-    this.arm(() => this.reveal(), durationMs + GRACE_MS);
+    this.arm(() => this.reveal(), lockMs + durationMs + GRACE_MS);
   }
 
   answer(msg: AnswerMsg) {
@@ -215,7 +227,7 @@ export class HostEngine {
     this.commit({
       phase: "reveal",
       players,
-      reveal: { questionId: q.id, answer: q.answer, track: q.track, picks: outPicks },
+      reveal: { questionId: q.id, answer: q.answer, track: q.track, choices: q.choices, picks: outPicks },
     });
     this.arm(() => this.next(), REVEAL_MS);
   }

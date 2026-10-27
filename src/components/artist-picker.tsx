@@ -100,7 +100,10 @@ export function ArtistPicker({ value, onChange }: { value: string[]; onChange: (
           className="w-full rounded-xl border-2 border-stage-2 bg-night px-4 py-3 placeholder:text-muted/60 focus:border-kho focus:outline-none disabled:opacity-50"
         />
         {visible.length > 0 && (
-          <ul id={listId} className="absolute inset-x-0 top-full z-10 mt-1 overflow-hidden rounded-xl border border-stage-2 bg-stage shadow-xl">
+          <ul
+            id={listId}
+            className="absolute inset-x-0 top-full z-10 mt-1 overflow-hidden rounded-xl border border-stage-2 bg-stage shadow-xl"
+          >
             {visible.map((s) => (
               <li key={s.id}>
                 <button

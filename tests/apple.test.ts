@@ -1,7 +1,8 @@
 // Apple API parsing with a stubbed fetch (no network needed).
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { getThaiChart, searchArtistSongs, toPoolTrack } from "../src/lib/apple.ts";
+import { getThaiChart, mapLimit, searchArtistDecoys, searchArtistSongs, toPoolTrack } from "../src/lib/apple.ts";
+import { GET as previewGET } from "../src/app/api/preview/route.ts";
 
 const song = (id: number, name: string, extra: Record<string, unknown> = {}) => ({
   wrapperType: "track",
@@ -65,4 +66,40 @@ test("searchArtistSongs falls back to a plain term search when artistTerm finds 
   assert.ok(tracks.every((t) => t.group === "บอดี้สแลม"));
   assert.ok(calls[0].includes("country=th"));
   assert.equal(calls.length, 2);
+});
+
+test("searchArtistDecoys marks tracks as decoy-only and makes one call", async () => {
+  const calls = stubFetch([[/attribute=artistTerm&limit=40/, { results: [song(21, "x"), song(22, "y")] }]]);
+  const d = await searchArtistDecoys("Potato");
+  assert.equal(d.length, 2);
+  assert.ok(d.every((t) => t.answerable === false));
+  assert.equal(calls.length, 1);
+});
+
+test("mapLimit keeps going when some jobs fail and respects the limit", async () => {
+  let running = 0;
+  let peak = 0;
+  const out = await mapLimit([1, 2, 3, 4, 5, 6], 3, async (n) => {
+    running++;
+    peak = Math.max(peak, running);
+    await new Promise((r) => setTimeout(r, 5));
+    running--;
+    if (n === 4) throw new Error("rate limited");
+    return n;
+  });
+  assert.deepEqual(out.sort(), [1, 2, 3, 5, 6]);
+  assert.ok(peak <= 3);
+});
+
+test("preview relay only fetches Apple preview hosts", async () => {
+  const calls = stubFetch([[/audio-ssl\.itunes\.apple\.com/, new Response("AUDIO", { headers: { "content-type": "audio/x-m4a" } })]]);
+  const req = (u: string) => ({ nextUrl: new URL(`http://localhost/api/preview?u=${encodeURIComponent(u)}`) }) as never;
+  assert.equal((await previewGET(req("https://evil.example.com/a.m4a"))).status, 403);
+  assert.equal((await previewGET(req("http://audio-ssl.itunes.apple.com/a.m4a"))).status, 403);
+  assert.equal((await previewGET(req("https://itunes.apple.com.evil.com/a.m4a"))).status, 403);
+  assert.equal((await previewGET(req("not a url"))).status, 400);
+  const ok = await previewGET(req("https://audio-ssl.itunes.apple.com/p/1.m4a"));
+  assert.equal(ok.status, 200);
+  assert.equal(await ok.text(), "AUDIO");
+  assert.equal(calls.length, 1);
 });

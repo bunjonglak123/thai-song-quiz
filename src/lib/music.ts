@@ -3,7 +3,8 @@
 
 import type { Choice, HostQuestion, Track } from "./types";
 
-export type PoolTrack = Track & { group: string };
+/** group = which search found it ("chart" or the artist the host typed). */
+export type PoolTrack = Track & { group: string; answerable?: boolean };
 
 /** Versions that make bad quiz questions (or duplicate the original). */
 const ALT_VERSION =
@@ -65,31 +66,19 @@ export type BuildResult = {
   warnings: string[];
 };
 
-/**
- * Build `rounds` 4-choice questions from a pool.
- * - Answers are spread across groups (one group per artist, or "chart").
- * - Wrong choices come from the same group first, so artist rounds are hard.
- * - No two choices in a question share the same title.
- */
-export function buildQuestions(
-  pool: PoolTrack[],
-  rounds: number,
-  roundSeconds: number,
-  rng: Rng = Math.random,
-): BuildResult {
-  const warnings: string[] = [];
-  const clean = dedupeTracks(pool.filter((t) => t.previewUrl));
-  const distinctTitles = new Set(clean.map((t) => normKey(t.title)));
-  if (distinctTitles.size < 4) {
-    return {
-      questions: [],
-      warnings: ["เพลงที่มีตัวอย่างให้ฟังน้อยเกินไป (ต้องมีอย่างน้อย 4 เพลง) ลองเพิ่มศิลปินหรือเปลี่ยนชื่อที่ค้นหา"],
-    };
-  }
+/** Key for an artist's main name: "Bodyslam & Palmy" and "Bodyslam" match. */
+export function primaryArtistKey(artist: string): string {
+  const first = artist.split(/\s*(?:,|&|\+|\s(?:x|X|ft\.?|feat\.?|และ|vs\.?)\s)\s*/)[0] ?? artist;
+  return normKey(first) || normKey(artist);
+}
 
-  // Group tracks, then pick answers round-robin across groups.
+/**
+ * Pick answer songs round-robin across groups (one group per chosen artist, or "chart"),
+ * never repeating a title. Tracks marked answerable=false are decoys only.
+ */
+export function pickAnswers(pool: PoolTrack[], rounds: number, rng: Rng = Math.random): PoolTrack[] {
   const groups = new Map<string, PoolTrack[]>();
-  for (const t of shuffle(clean, rng)) {
+  for (const t of shuffle(dedupeTracks(pool.filter((t) => t.previewUrl && t.answerable !== false)), rng)) {
     if (!groups.has(t.group)) groups.set(t.group, []);
     groups.get(t.group)!.push(t);
   }
@@ -114,25 +103,55 @@ export function buildQuestions(
       cursors.set(g, i);
     }
   }
+  return answers;
+}
+
+/**
+ * Build 4-choice questions.
+ * Wrong choices are chosen to be as hard as possible:
+ *   1. other songs by the same main artist (so recognising the voice isn't enough)
+ *   2. songs from the same group (same chosen artist / the chart)
+ *   3. anything else
+ * No two choices in a question share a title. `clipSeconds` is listen + answer time,
+ * used to pick a start point that still fits inside the 30-second preview.
+ */
+export function buildQuestions(
+  pool: PoolTrack[],
+  rounds: number,
+  clipSeconds: number,
+  rng: Rng = Math.random,
+  preselected?: PoolTrack[],
+): BuildResult {
+  const warnings: string[] = [];
+  const clean = dedupeTracks(pool.filter((t) => t.previewUrl));
+  const distinctTitles = new Set(clean.map((t) => normKey(t.title)));
+  if (distinctTitles.size < 4) {
+    return {
+      questions: [],
+      warnings: ["เพลงที่มีตัวอย่างให้ฟังน้อยเกินไป (ต้องมีอย่างน้อย 4 เพลง) ลองเพิ่มศิลปินหรือเปลี่ยนชื่อที่ค้นหา"],
+    };
+  }
+
+  const answers = (preselected ?? pickAnswers(clean, rounds, rng)).slice(0, rounds);
   if (answers.length < rounds) {
     warnings.push(`มีเพลงพอสำหรับ ${answers.length} ข้อ จากที่ตั้งไว้ ${rounds} ข้อ`);
   }
 
-  const maxStart = Math.max(0, Math.min(12, 29 - roundSeconds));
+  const maxStart = Math.max(0, Math.min(12, 29 - clipSeconds));
 
   const questions: HostQuestion[] = answers.map((ans, qi) => {
     const ansKey = normKey(ans.title);
-    const same = shuffle(
-      clean.filter((t) => t.group === ans.group && normKey(t.title) !== ansKey),
-      rng,
-    );
-    const other = shuffle(
-      clean.filter((t) => t.group !== ans.group && normKey(t.title) !== ansKey),
-      rng,
-    );
+    const ansArtist = primaryArtistKey(ans.artist);
+    const tiers: PoolTrack[][] = [[], [], []];
+    for (const t of clean) {
+      if (normKey(t.title) === ansKey) continue;
+      if (primaryArtistKey(t.artist) === ansArtist) tiers[0].push(t);
+      else if (t.group === ans.group) tiers[1].push(t);
+      else tiers[2].push(t);
+    }
     const picked: PoolTrack[] = [];
     const keys = new Set([ansKey]);
-    for (const t of [...same, ...other]) {
+    for (const t of tiers.flatMap((tier) => shuffle(tier, rng))) {
       if (picked.length >= 3) break;
       const k = normKey(t.title);
       if (keys.has(k)) continue;
@@ -143,7 +162,7 @@ export function buildQuestions(
     const choices: Choice[] = all.map((t) => ({ title: t.title, artist: t.artist }));
     return {
       id: `q${qi}-${Math.floor(rng() * 1e9).toString(36)}`,
-      track: stripGroup(ans),
+      track: stripTrack(ans),
       choices,
       answer: all.indexOf(ans),
       startAt: Math.floor(rng() * (maxStart + 1)),
@@ -153,9 +172,9 @@ export function buildQuestions(
   return { questions, warnings };
 }
 
-function stripGroup(t: PoolTrack): Track {
+function stripTrack(t: PoolTrack): Track {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const { group, ...rest } = t;
+  const { group, answerable, ...rest } = t;
   return rest;
 }
 

@@ -122,6 +122,40 @@ export async function searchArtistSongs(artist: string): Promise<PoolTrack[]> {
   return tracks;
 }
 
+/**
+ * Other songs by an artist, used only as wrong choices (one API call, no fallback,
+ * to stay well inside iTunes' rate limit).
+ */
+export async function searchArtistDecoys(artist: string): Promise<PoolTrack[]> {
+  const term = encodeURIComponent(artist.trim());
+  const data = await getJson<{ results?: ItunesTrack[] }>(
+    `https://itunes.apple.com/search?term=${term}&country=${COUNTRY}&media=music&entity=song&attribute=artistTerm&limit=40`,
+  );
+  return (data.results ?? [])
+    .map((r) => toPoolTrack(r, `decoy:${artist}`))
+    .filter((t): t is PoolTrack => !!t)
+    .map((t) => ({ ...t, answerable: false }));
+}
+
+/** Run async jobs with limited concurrency, ignoring failures. */
+export async function mapLimit<T, R>(items: T[], limit: number, fn: (x: T) => Promise<R>): Promise<R[]> {
+  const out: R[] = [];
+  let i = 0;
+  await Promise.all(
+    Array.from({ length: Math.min(limit, items.length) }, async () => {
+      while (i < items.length) {
+        const item = items[i++];
+        try {
+          out.push(await fn(item));
+        } catch {
+          /* a missing decoy list just means easier choices for that song */
+        }
+      }
+    }),
+  );
+  return out;
+}
+
 export async function suggestArtists(q: string): Promise<{ id: number; name: string; genre?: string }[]> {
   const term = encodeURIComponent(q.trim());
   const data = await getJson<{ results?: ItunesArtist[] }>(

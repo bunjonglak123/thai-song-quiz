@@ -39,25 +39,29 @@ function Room({ code }: { code: string }) {
   if (!me) {
     return (
       <Shell>
-        <form onSubmit={join} className="flex flex-col gap-4 pt-6">
-          <p className="text-muted">{isHost ? "ห้องของคุณ" : "กำลังเข้าห้อง"}</p>
-          <p className="font-display text-5xl tracking-[0.18em]">{code}</p>
-          <label htmlFor="jname" className="mt-6 text-[15px] text-muted">
-            ชื่อที่เพื่อนจะเห็น
-          </label>
-          <input
-            id="jname"
-            value={name}
-            maxLength={16}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="เช่น ภานุ"
-            autoComplete="nickname"
-            className="rounded-2xl border-2 border-stage-2 bg-stage px-4 py-3.5 text-lg placeholder:text-muted/60 focus:border-kho focus:outline-none"
-          />
-          <Button type="submit" disabled={!name.trim()}>
-            {isHost ? "เปิดห้อง" : "เข้าห้อง"}
-          </Button>
-          <p className="text-sm text-muted">เปิดเสียงเครื่องไว้ เกมจะเล่นเพลงทันทีที่เริ่มแต่ละข้อ</p>
+        <form onSubmit={join} className="grid gap-4 pt-6 md:grid-cols-2 md:items-center md:gap-16 md:pt-[12vh]">
+          <div>
+            <p className="text-muted lg:text-lg">{isHost ? "ห้องของคุณ" : "กำลังเข้าห้อง"}</p>
+            <p className="font-display text-5xl tracking-[0.18em] md:text-7xl lg:text-8xl">{code}</p>
+          </div>
+          <div className="flex flex-col gap-4 md:rounded-3xl md:bg-stage/60 md:p-8">
+            <label htmlFor="jname" className="mt-6 text-[15px] text-muted md:mt-0">
+              ชื่อที่เพื่อนจะเห็น
+            </label>
+            <input
+              id="jname"
+              value={name}
+              maxLength={16}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="เช่น ภานุ"
+              autoComplete="nickname"
+              className="rounded-2xl border-2 border-stage-2 bg-stage px-4 py-3.5 text-lg placeholder:text-muted/60 focus:border-kho focus:outline-none"
+            />
+            <Button type="submit" disabled={!name.trim()}>
+              {isHost ? "เปิดห้อง" : "เข้าห้อง"}
+            </Button>
+            <p className="text-sm text-muted">เปิดเสียงเครื่องไว้ เกมจะเล่นเพลงทันทีที่เริ่มแต่ละข้อ</p>
+          </div>
         </form>
       </Shell>
     );
@@ -87,7 +91,7 @@ function Game({ code, me, isHost }: { code: string; me: Member; isHost: boolean 
 
   return (
     <Shell volume>
-      <div className="space-y-4 pb-2">
+      <div className="space-y-4 pb-2 lg:pb-4">
         {transportKind === "local" && (
           <Banner tone="warn">
             โหมดทดสอบในเครื่อง: เล่นได้เฉพาะแท็บในเบราว์เซอร์นี้ ตั้งค่า Supabase ในไฟล์ .env.local เพื่อเล่นกับเพื่อนข้ามเครื่อง
@@ -122,8 +126,8 @@ function Game({ code, me, isHost }: { code: string; me: Member; isHost: boolean 
 
 function Shell({ children, volume = false }: { children?: React.ReactNode; volume?: boolean }) {
   return (
-    <main className="mx-auto min-h-dvh max-w-md px-4 pb-10 pt-4">
-      <header className="mb-4 flex items-center justify-between gap-4">
+    <main className="mx-auto min-h-dvh w-full max-w-7xl px-4 pb-10 pt-4 sm:px-6 lg:px-10 lg:pt-6">
+      <header className="mb-4 flex items-center justify-between gap-4 lg:mb-8">
         <Link href="/" className="font-display text-lg text-muted hover:text-ink">
           ทายเพลงไทย
         </Link>
@@ -141,7 +145,7 @@ function Volume() {
       เสียง
       <input
         type="range"
-        min={0.05}
+        min={0}
         max={1}
         step={0.05}
         value={v}
@@ -150,7 +154,7 @@ function Volume() {
           setV(n);
           setVolume(n);
         }}
-        className="w-24 accent-kho"
+        className="w-24 accent-kho lg:w-36"
         aria-label="ระดับเสียง"
       />
     </label>

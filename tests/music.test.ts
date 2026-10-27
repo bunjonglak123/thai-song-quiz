@@ -1,7 +1,8 @@
 // Run: npm test   (uses Node's built-in test runner + type stripping)
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { buildQuestions, cleanTitle, isAltVersion, normKey, scoreFor, type PoolTrack } from "../src/lib/music.ts";
+import { buildQuestions, cleanTitle, isAltVersion, normKey, pickAnswers, primaryArtistKey, scoreFor, type PoolTrack } from "../src/lib/music.ts";
+import { sliderToGain } from "../src/lib/audio.ts";
 
 function seeded(seed = 42) {
   let s = seed;
@@ -86,4 +87,52 @@ test("scoreFor rewards speed and streaks", () => {
   assert.equal(scoreFor(true, 15000, 15000, 1), 500);
   assert.equal(scoreFor(true, 15000, 15000, 3), 700);
   assert.equal(scoreFor(true, 15000, 15000, 10), 800);
+});
+
+test("primaryArtistKey groups collaborations under the main artist", () => {
+  assert.equal(primaryArtistKey("Bodyslam & Palmy"), primaryArtistKey("Bodyslam"));
+  assert.equal(primaryArtistKey("Three Man Down x Lula"), primaryArtistKey("Three Man Down"));
+  assert.equal(primaryArtistKey("BOWKYLION feat. Jeff Satur"), primaryArtistKey("BOWKYLION"));
+  assert.equal(primaryArtistKey("ไผ่ พงศธร และ ตั๊กแตน"), primaryArtistKey("ไผ่ พงศธร"));
+  assert.notEqual(primaryArtistKey("Potato"), primaryArtistKey("Palmy"));
+});
+
+test("chart mode: decoys by the same artist win over other chart songs", () => {
+  // Chart: every song by a different artist (the case that made the quiz too easy)
+  const chart = ["A", "B", "C", "D", "E", "F"].map((a, i) => t(`ฮิต ${i}`, `ศิลปิน ${a}`, "chart"));
+  // Extra songs by each chart artist, usable only as wrong choices
+  const decoys = ["A", "B", "C", "D", "E", "F"].flatMap((a) =>
+    [1, 2, 3].map((n) => t(`${a} เพลงอื่น ${n}`, `ศิลปิน ${a}`, `decoy:${a}`, { answerable: false })),
+  );
+  const pool = [...chart, ...decoys];
+  const answers = pickAnswers(pool, 6, seeded(11));
+  assert.equal(answers.length, 6);
+  assert.ok(answers.every((a) => a.group === "chart"), "decoys never become answers");
+  const { questions } = buildQuestions(pool, 6, 18, seeded(11), answers);
+  for (const q of questions) {
+    assert.ok(q.choices.every((c) => c.artist === q.track.artist), `all four by ${q.track.artist}`);
+  }
+});
+
+test("chart mode without decoys still works (falls back to other chart songs)", () => {
+  const chart = ["A", "B", "C", "D", "E"].map((a, i) => t(`ฮิต ${i}`, `ศิลปิน ${a}`, "chart"));
+  const { questions } = buildQuestions(chart, 3, 18, seeded(5));
+  assert.equal(questions.length, 3);
+  for (const q of questions) assert.equal(q.choices.length, 4);
+});
+
+test("start point leaves room for listen + answer time inside the 30s preview", () => {
+  const pool = Array.from({ length: 8 }, (_, i) => t(`s${i}`, "A"));
+  for (const clip of [10, 18, 25]) {
+    const { questions } = buildQuestions(pool, 8, clip, seeded(clip));
+    assert.ok(questions.every((q) => q.startAt + clip <= 29), `clip ${clip}`);
+  }
+});
+
+test("volume slider is perceptual: low positions are genuinely quiet", () => {
+  assert.equal(sliderToGain(0), 0);
+  assert.equal(sliderToGain(1), 1);
+  assert.ok(sliderToGain(0.1) < 0.002);
+  assert.ok(Math.abs(sliderToGain(0.55) - 0.166) < 0.001);
+  assert.ok(sliderToGain(0.5) < 0.13);
 });

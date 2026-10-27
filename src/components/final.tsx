@@ -23,28 +23,33 @@ export function FinalView({
   const tie = ranked.length > 1 && ranked[1].score === top?.score;
 
   return (
-    <div className="flex flex-col gap-6">
-      <div>
+    // Phones: winner, scores, buttons. Wide screens: winner + buttons left, scores right.
+    <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_24rem] lg:grid-rows-[auto_1fr] lg:gap-x-12">
+      <div className="lg:col-start-1 lg:row-start-1 lg:pt-6">
         <p className="font-display text-lg text-muted">จบเกม</p>
-        <h2 className="mt-1 font-display text-4xl leading-tight">
+        <h2 className="mt-1 font-display text-4xl leading-tight lg:text-7xl">
           {!top || top.score === 0 ? "ไม่มีใครได้คะแนนเลย" : tie ? "เสมอกันที่หนึ่ง" : `${top.name} ชนะ`}
         </h2>
-        {top && top.score > 0 && <p className="mt-1 font-display text-2xl text-kho tabular-nums">{top.score} คะแนน</p>}
+        {top && top.score > 0 && <p className="mt-1 font-display text-2xl text-kho tabular-nums lg:text-4xl">{top.score} คะแนน</p>}
         {myRank > 1 && <p className="mt-3 text-muted">คุณได้อันดับ {myRank}</p>}
       </div>
 
-      <Scoreboard state={state} meId={meId} />
+      <div className="lg:col-start-2 lg:row-span-2 lg:row-start-1">
+        <Scoreboard state={state} meId={meId} />
+      </div>
 
-      {isHost ? (
-        <div className="grid gap-3">
-          <Button onClick={onAgain}>เล่นอีกรอบ (สุ่มเพลงใหม่)</Button>
-          <Button tone="secondary" onClick={onLobby}>
-            เปลี่ยนเพลงหรือตั้งค่า
-          </Button>
-        </div>
-      ) : (
-        <p className="text-center text-muted">รอหัวห้องเริ่มรอบใหม่</p>
-      )}
+      <div className="lg:col-start-1 lg:row-start-2">
+        {isHost ? (
+          <div className="grid gap-3 lg:max-w-sm">
+            <Button onClick={onAgain}>เล่นอีกรอบ (สุ่มเพลงใหม่)</Button>
+            <Button tone="secondary" onClick={onLobby}>
+              เปลี่ยนเพลงหรือตั้งค่า
+            </Button>
+          </div>
+        ) : (
+          <p className="text-center text-muted lg:text-left">รอหัวห้องเริ่มรอบใหม่</p>
+        )}
+      </div>
     </div>
   );
 }
