@@ -137,6 +137,15 @@ export async function searchArtistDecoys(artist: string): Promise<PoolTrack[]> {
     .map((t) => ({ ...t, answerable: false }));
 }
 
+/** Plain song search (title + artist), used to match playlist entries to Apple previews. */
+export async function searchSongs(term: string, limit = 10): Promise<PoolTrack[]> {
+  const q = encodeURIComponent(term.trim().slice(0, 120));
+  const data = await getJson<{ results?: ItunesTrack[] }>(
+    `https://itunes.apple.com/search?term=${q}&country=${COUNTRY}&media=music&entity=song&limit=${limit}`,
+  );
+  return (data.results ?? []).map((r) => toPoolTrack(r, "playlist")).filter((t): t is PoolTrack => !!t);
+}
+
 /** Run async jobs with limited concurrency, ignoring failures. */
 export async function mapLimit<T, R>(items: T[], limit: number, fn: (x: T) => Promise<R>): Promise<R[]> {
   const out: R[] = [];

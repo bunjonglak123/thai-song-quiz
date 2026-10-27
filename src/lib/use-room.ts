@@ -2,16 +2,20 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { HostEngine, type HostSnapshot } from "./host-engine";
+import { getPlaylistTracks } from "./spotify";
 import { createTransport, hasSupabase, type Member, type RoomTransport } from "./transport";
 import type { GameSettings, GameState, HostQuestion } from "./types";
 
 export type ConnStatus = "connecting" | "ok" | "error" | "no-host";
 
 async function fetchQuestions(settings: GameSettings) {
+  // Spotify only lets the logged-in host read their playlist, so the host's browser
+  // fetches the song list and sends it along.
+  const tracks = settings.source.kind === "spotify" ? await getPlaylistTracks(settings.source.playlistId) : undefined;
   const res = await fetch("/api/questions", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(settings),
+    body: JSON.stringify({ ...settings, tracks }),
   });
   const data = (await res.json().catch(() => ({}))) as {
     questions?: HostQuestion[];

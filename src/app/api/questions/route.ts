@@ -1,13 +1,26 @@
-import { getThaiChart, mapLimit, searchArtistDecoys, searchArtistSongs } from "@/lib/apple";
-import { buildQuestions, pickAnswers, type PoolTrack } from "@/lib/music";
+import { getThaiChart, mapLimit, searchArtistDecoys, searchArtistSongs, searchSongs } from "@/lib/apple";
+import { buildQuestions, pickAnswers, type PoolTrack, type WantedTrack } from "@/lib/music";
 import { mockPool } from "@/lib/mock";
+import { resolveTrackList, resolveYouTube } from "@/lib/playlist";
+import { presetById } from "@/lib/presets";
 import type { SongSource } from "@/lib/types";
+import { fetchYouTubePlaylist } from "@/lib/youtube";
 
 const MAX_ARTISTS = 8;
 const MAX_DECOY_SEARCHES = 12;
+const MAX_TRACKS = 500;
+
+type Body = {
+  source?: SongSource;
+  rounds?: number;
+  roundSeconds?: number;
+  listenSeconds?: number;
+  /** Spotify playlists are read in the host's browser (with their login) and sent here. */
+  tracks?: WantedTrack[];
+};
 
 export async function POST(req: Request) {
-  let body: { source?: SongSource; rounds?: number; roundSeconds?: number; listenSeconds?: number };
+  let body: Body;
   try {
     body = await req.json();
   } catch {
@@ -34,12 +47,12 @@ export async function POST(req: Request) {
       const artists = [...new Set(answers.map((a) => mainArtist(a.artist)))].slice(0, MAX_DECOY_SEARCHES);
       const decoys = await mapLimit(artists, 3, searchArtistDecoys);
       pool = [...pool, ...decoys.flat()];
-    } else if (source?.kind === "artists") {
-      const artists = [...new Set((source.artists ?? []).map((a) => String(a).trim().slice(0, 60)).filter(Boolean))].slice(
-        0,
-        MAX_ARTISTS,
-      );
-      if (!artists.length) return Response.json({ error: "ยังไม่ได้เลือกศิลปิน" }, { status: 400 });
+    } else if (source?.kind === "artists" || source?.kind === "preset") {
+      const list = source.kind === "preset" ? (presetById(source.id)?.artists ?? []) : (source.artists ?? []);
+      const artists = [...new Set(list.map((a) => String(a).trim().slice(0, 60)).filter(Boolean))].slice(0, MAX_ARTISTS);
+      if (!artists.length) {
+        return Response.json({ error: source.kind === "preset" ? "ไม่พบชุดเพลงนี้" : "ยังไม่ได้เลือกศิลปิน" }, { status: 400 });
+      }
       const results = await Promise.allSettled(artists.map((a) => searchArtistSongs(a)));
       results.forEach((r, i) => {
         if (r.status === "fulfilled") {
@@ -49,6 +62,20 @@ export async function POST(req: Request) {
           warnings.push(`ค้นหา "${artists[i]}" ไม่สำเร็จ`);
         }
       });
+    } else if (source?.kind === "spotify") {
+      const tracks = Array.isArray(body.tracks) ? body.tracks.slice(0, MAX_TRACKS) : [];
+      if (!tracks.length) return Response.json({ error: "ไม่ได้รับรายการเพลงจาก Spotify" }, { status: 400 });
+      const r = await resolveTrackList(tracks, rounds, (t) => searchSongs(t));
+      pool = r.pool;
+      answers = r.answers;
+      warnings.push(...r.warnings);
+    } else if (source?.kind === "youtube") {
+      const { items } = await fetchYouTubePlaylist(source.playlistId);
+      if (!items.length) return Response.json({ error: "เพลย์ลิสต์ YouTube นี้ว่างหรือดึงรายการไม่ได้" }, { status: 422 });
+      const r = await resolveYouTube(items, rounds, (t) => searchSongs(t));
+      pool = r.pool;
+      answers = r.answers;
+      warnings.push(...r.warnings);
     } else {
       return Response.json({ error: "ไม่รู้จักแหล่งเพลงนี้" }, { status: 400 });
     }
@@ -56,6 +83,9 @@ export async function POST(req: Request) {
     return Response.json({ error: e instanceof Error ? e.message : "ดึงเพลงไม่สำเร็จ" }, { status: 502 });
   }
 
+  if (answers && !answers.length) {
+    return Response.json({ error: warnings.join(" · ") || "หาเพลงที่มีตัวอย่างไม่เจอ" }, { status: 422 });
+  }
   const built = buildQuestions(pool, rounds, listenSeconds + roundSeconds, Math.random, answers);
   warnings.push(...built.warnings);
   if (!built.questions.length) {

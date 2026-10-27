@@ -120,20 +120,24 @@ export function QuestionView({
         <ul className="grid gap-3 md:grid-cols-2 md:gap-4" aria-label="ตัวเลือก">
           {q.choices.map((c, i) => {
             const chosen = answered === i;
-            const dim = (answered != null && !chosen) || (timeUp && answered == null);
             return (
               <li key={i}>
                 <button
                   onClick={() => pick(i)}
                   disabled={listening || answered != null || timeUp}
                   aria-pressed={chosen}
-                  className={`key flex h-full min-h-[4.5rem] w-full items-center gap-4 rounded-2xl p-3 pr-4 text-left text-deep md:min-h-28 md:p-4 lg:min-h-32 ${CHOICE_BG[i]} ${
-                    dim ? "opacity-35" : ""
-                  } ${listening ? "opacity-60" : ""} ${chosen ? "ring-4 ring-ink ring-offset-2 ring-offset-night" : ""} disabled:cursor-default`}
+                  className={`key flex h-full min-h-[4.5rem] w-full items-center gap-4 rounded-2xl p-3 pr-4 text-left text-deep md:min-h-28 md:p-4 lg:min-h-32 relative ${CHOICE_BG[i]} ${
+                    listening ? "opacity-60" : ""
+                  } ${chosen ? "ring-[6px] ring-good ring-offset-4 ring-offset-night" : ""} disabled:cursor-default`}
                 >
                   <span className="grid size-12 shrink-0 place-items-center rounded-xl bg-deep/15 font-display text-3xl md:size-16 md:text-4xl">
                     {CHOICE_MARKS[i]}
                   </span>
+                  {chosen && (
+                    <span className="absolute -right-2 -top-2 grid size-8 place-items-center rounded-full bg-good font-display text-lg text-deep shadow">
+                      ✓
+                    </span>
+                  )}
                   {/* Titles stay hidden while listening, so everyone has to actually listen. */}
                   {listening ? (
                     <span aria-hidden className="h-5 w-2/3 rounded-full bg-deep/15" />

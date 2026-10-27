@@ -25,7 +25,11 @@ export type HostQuestion = {
 
 export type SongSource =
   | { kind: "chart"; size: 50 | 100 }
-  | { kind: "artists"; artists: string[] };
+  | { kind: "artists"; artists: string[] }
+  | { kind: "preset"; id: string }
+  /** Host's own Spotify playlist; the host's browser reads it at game start. */
+  | { kind: "spotify"; playlistId: string; name: string; count?: number }
+  | { kind: "youtube"; playlistId: string; name?: string };
 
 export type GameSettings = {
   source: SongSource;

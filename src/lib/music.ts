@@ -123,7 +123,8 @@ export function buildQuestions(
   preselected?: PoolTrack[],
 ): BuildResult {
   const warnings: string[] = [];
-  const clean = dedupeTracks(pool.filter((t) => t.previewUrl));
+  // Decoy-only tracks (answerable=false) don't need a preview: they're just titles.
+  const clean = dedupeTracks(pool.filter((t) => t.previewUrl || t.answerable === false));
   const distinctTitles = new Set(clean.map((t) => normKey(t.title)));
   if (distinctTitles.size < 4) {
     return {
@@ -185,4 +186,76 @@ export function scoreFor(correct: boolean, ms: number, durationMs: number, strea
   const speed = Math.round(500 * (1 - t));
   const bonus = Math.min(Math.max(streak - 1, 0), 3) * 100;
   return 500 + speed + bonus;
+}
+
+// ---------------------------------------------------------------------------
+// Playlist matching (Spotify / YouTube → Apple Music previews)
+
+export type WantedTrack = { title: string; artist: string };
+
+const VIDEO_NOISE =
+  /\b(official\s*(music\s*)?(video|mv|audio|lyric(s)?\s*video|visualizer|teaser)|music\s*video|lyric(s)?\s*video|visualizer|teaser|full\s*song|audio|mv|m\/v|4k|hd)\b|เนื้อเพลง|คาราโอเกะ|เพลงประกอบ.*$|ost\..*$/gi;
+
+/** "ฝนตกไหม - Three Man Down 【Official MV】 | GMM" → "ฝนตกไหม - Three Man Down" */
+export function cleanVideoTitle(raw: string): string {
+  let t = raw
+    .replace(/[\[(【「『（][^\])】」』）]*[\])】」』）]/g, " ")
+    .replace(/#\S+/g, " ")
+    .replace(/\s[|｜].*$/, " ")
+    .replace(/\s(feat\.?|ft\.?|prod\.?\s*by)\s.*$/i, " ")
+    .replace(VIDEO_NOISE, " ")
+    .replace(/["“”]/g, " ")
+    .replace(/\s{2,}/g, " ")
+    .trim()
+    .replace(/[-–—:|]+$/, "")
+    .trim();
+  if (!t) t = raw.trim();
+  return t;
+}
+
+/**
+ * Best-effort split of a YouTube playlist item into a search query.
+ * YouTube Music "Artist - Topic" channels give clean title + artist; anything else
+ * is searched as the cleaned video title, which usually contains both.
+ */
+export function parseYouTubeItem(videoTitle: string, channel: string): { query: string; title?: string; artist?: string } {
+  const topic = channel.match(/^(.*)\s-\sTopic$/i);
+  if (topic) {
+    const title = cleanVideoTitle(videoTitle);
+    return { query: `${title} ${topic[1]}`, title, artist: topic[1] };
+  }
+  return { query: cleanVideoTitle(videoTitle) };
+}
+
+/**
+ * Pick the Apple Music result that really is the wanted song.
+ * - With a known title: the titles must match (ignoring spacing/feat./brackets).
+ * - Without one (YouTube): the result's title must appear inside the query.
+ * A matching artist breaks ties and is required when titles only overlap.
+ */
+export function pickMatch<T extends Track>(results: T[], want: { query: string; title?: string; artist?: string }): T | null {
+  const q = normKey(want.query);
+  const wt = want.title ? normKey(want.title) : "";
+  const wa = want.artist ? primaryArtistKey(want.artist) : "";
+  let best: T | null = null;
+  let bestScore = 0;
+  for (const r of results) {
+    const rt = normKey(r.title);
+    if (!rt) continue;
+    const ra = primaryArtistKey(r.artist);
+    const artistOk = !!wa && (ra === wa || ra.includes(wa) || wa.includes(ra) || q.includes(ra));
+    let score = 0;
+    if (wt) {
+      if (rt === wt) score = 4;
+      else if (rt.includes(wt) || wt.includes(rt)) score = artistOk ? 3 : 0;
+    } else if (q.includes(rt) && rt.length >= 2) {
+      score = q.includes(ra) ? 4 : 2;
+    }
+    if (score && artistOk) score += 2;
+    if (score > bestScore) {
+      best = r;
+      bestScore = score;
+    }
+  }
+  return bestScore >= 2 ? best : null;
 }

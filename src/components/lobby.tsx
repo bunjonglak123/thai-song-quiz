@@ -1,8 +1,10 @@
 "use client";
 
 import { useState } from "react";
-import type { GameSettings, GameState } from "@/lib/types";
+import { PRESETS, presetById } from "@/lib/presets";
+import type { GameSettings, GameState, SongSource } from "@/lib/types";
 import { ArtistPicker } from "./artist-picker";
+import { PresetPicker, SpotifyPicker, YouTubePicker } from "./source-pickers";
 import { Avatar, Banner, Button } from "./ui";
 
 export function Lobby({
@@ -23,15 +25,15 @@ export function Lobby({
   const players = Object.values(state.players).filter((p) => p.online);
   const s = state.settings;
   const loading = state.phase === "loading";
-  const artistCount = s.source.kind === "artists" ? s.source.artists.length : 0;
-  const canStart = !loading && (s.source.kind === "chart" || artistCount > 0);
+  const missing = whatsMissing(s);
+  const canStart = !loading && !missing;
 
   const start = (
     <>
       <Button className="w-full" onClick={onStart} disabled={!canStart}>
         {loading ? "กำลังโหลดเพลง…" : "เริ่มเกม"}
       </Button>
-      {!canStart && !loading && <p className="mt-2 text-center text-sm text-muted">เลือกศิลปินอย่างน้อย 1 คนก่อนเริ่ม</p>}
+      {missing && !loading && <p className="mt-2 text-center text-sm text-muted">{missing}</p>}
     </>
   );
 
@@ -116,37 +118,94 @@ function HostSettings({
   disabled: boolean;
 }) {
   const src = settings.source;
-  // Keep the artist list around when the host flips to the chart and back.
+  // Remember each mode's choice, so flipping between modes doesn't lose it.
   const [artists, setArtists] = useState<string[]>(src.kind === "artists" ? src.artists : []);
+  const [presetId, setPresetId] = useState(src.kind === "preset" ? src.id : PRESETS[0].id);
+  const [spotify, setSpotify] = useState<Extract<SongSource, { kind: "spotify" }> | undefined>(src.kind === "spotify" ? src : undefined);
+  const [youtube, setYoutube] = useState<Extract<SongSource, { kind: "youtube" }> | undefined>(src.kind === "youtube" ? src : undefined);
 
-  const setArtistsAndSync = (a: string[]) => {
-    setArtists(a);
-    onChange({ ...settings, source: { kind: "artists", artists: a } });
-  };
+  const setSource = (source: SongSource) => onChange({ ...settings, source });
+  // An empty selection is stored with a blank id; whatsMissing() then asks the host to pick one.
+  const spotifySource = (v = spotify): SongSource => v ?? { kind: "spotify", playlistId: "", name: "" };
+  const youtubeSource = (v = youtube): SongSource => v ?? { kind: "youtube", playlistId: "" };
 
   return (
     <fieldset disabled={disabled} className="space-y-6 disabled:opacity-60">
       <section>
         <h2 className="font-display text-xl">เลือกเพลงจาก</h2>
-        <div role="radiogroup" className="mt-3 grid grid-cols-2 gap-2">
+        <div role="radiogroup" className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-5">
           <Option
             selected={src.kind === "chart"}
-            onClick={() => onChange({ ...settings, source: { kind: "chart", size: 100 } })}
-            title="ชาร์ตเพลงไทยตอนนี้"
+            onClick={() => setSource({ kind: "chart", size: 100 })}
+            title="ชาร์ตตอนนี้"
             detail="100 เพลงที่คนไทยฟังเยอะสุดบน Apple Music"
           />
           <Option
+            selected={src.kind === "preset"}
+            onClick={() => setSource({ kind: "preset", id: presetId })}
+            title="ชุดเพลง"
+            detail="ร็อก 2000, ป๊อป 90, ลูกทุ่ง, อกหัก…"
+          />
+          <Option
             selected={src.kind === "artists"}
-            onClick={() => onChange({ ...settings, source: { kind: "artists", artists } })}
+            onClick={() => setSource({ kind: "artists", artists })}
             title="เลือกศิลปินเอง"
-            detail="สุ่มเพลงจากศิลปินที่เลือก สูงสุด 8 คน"
+            detail="สุ่มจากศิลปินที่เลือก สูงสุด 8 คน"
+          />
+          <Option
+            selected={src.kind === "spotify"}
+            onClick={() => setSource(spotifySource())}
+            title="Spotify playlist"
+            detail="เพลย์ลิสต์ของหัวห้อง"
+          />
+          <Option
+            selected={src.kind === "youtube"}
+            onClick={() => setSource(youtubeSource())}
+            title="YouTube playlist"
+            detail="วางลิงก์เพลย์ลิสต์"
           />
         </div>
-        {src.kind === "artists" && (
-          <div className="mt-4">
-            <ArtistPicker value={artists} onChange={setArtistsAndSync} />
-          </div>
-        )}
+
+        <div className="mt-4">
+          {src.kind === "preset" && (
+            <PresetPicker
+              value={src.id}
+              onPick={(id) => {
+                setPresetId(id);
+                setSource({ kind: "preset", id });
+              }}
+            />
+          )}
+          {src.kind === "artists" && (
+            <ArtistPicker
+              value={artists}
+              onChange={(a) => {
+                setArtists(a);
+                setSource({ kind: "artists", artists: a });
+              }}
+            />
+          )}
+          {src.kind === "spotify" && (
+            <SpotifyPicker
+              value={spotify}
+              onPick={(p) => {
+                const v = { kind: "spotify" as const, playlistId: p.id, name: p.name, count: p.count ?? undefined };
+                setSpotify(v);
+                setSource(v);
+              }}
+            />
+          )}
+          {src.kind === "youtube" && (
+            <YouTubePicker
+              value={youtube?.playlistId ? youtube : undefined}
+              onPick={(p) => {
+                const v = { kind: "youtube" as const, playlistId: p.playlistId, name: p.name };
+                setYoutube(v);
+                setSource(v);
+              }}
+            />
+          )}
+        </div>
       </section>
 
       <section className="grid grid-cols-2 gap-x-4 gap-y-5 md:grid-cols-3 md:gap-x-6">
@@ -234,7 +293,27 @@ function Stepper({
 }
 
 function describe(s: GameSettings) {
-  const src = s.source.kind === "chart" ? "ชาร์ตเพลงไทยตอนนี้ (Apple Music)" : `ศิลปิน: ${s.source.artists.join(", ") || "ยังไม่ได้เลือก"}`;
+  const src = s.source;
+  const what =
+    src.kind === "chart"
+      ? "ชาร์ตเพลงไทยตอนนี้ (Apple Music)"
+      : src.kind === "artists"
+        ? `ศิลปิน: ${src.artists.join(", ") || "ยังไม่ได้เลือก"}`
+        : src.kind === "preset"
+          ? `ชุดเพลง: ${presetById(src.id)?.name ?? "-"}`
+          : src.kind === "spotify"
+            ? `Spotify: ${src.name || "ยังไม่ได้เลือก"}`
+            : `YouTube: ${src.name || "ยังไม่ได้เลือก"}`;
   const listen = s.listenSeconds ? `ฟังก่อน ${s.listenSeconds} วิ แล้วตอบใน ${s.roundSeconds} วิ` : `ตอบใน ${s.roundSeconds} วิ`;
-  return `${src} · ${s.rounds} ข้อ · ${listen}`;
+  return `${what} · ${s.rounds} ข้อ · ${listen}`;
+}
+
+/** What the host still has to choose before starting, or null when ready. */
+function whatsMissing(s: GameSettings): string | null {
+  const src = s.source;
+  if (src.kind === "artists" && !src.artists.length) return "เลือกศิลปินอย่างน้อย 1 คนก่อนเริ่ม";
+  if (src.kind === "preset" && !presetById(src.id)) return "เลือกชุดเพลงก่อนเริ่ม";
+  if (src.kind === "spotify" && !src.playlistId) return "เลือกเพลย์ลิสต์ Spotify ก่อนเริ่ม";
+  if (src.kind === "youtube" && !src.playlistId) return "วางลิงก์เพลย์ลิสต์ YouTube ก่อนเริ่ม";
+  return null;
 }
