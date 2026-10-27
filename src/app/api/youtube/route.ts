@@ -1,8 +1,17 @@
 import type { NextRequest } from "next/server";
-import { fetchYouTubePlaylist, parseYouTubePlaylistId } from "@/lib/youtube";
+import { fetchYouTubePlaylist, parseYouTubePlaylistId, searchYouTubePlaylists } from "@/lib/youtube";
 
-// Check a pasted YouTube playlist link before the game starts: name and song count.
+// ?url=<link>  check a pasted playlist link: name and song count
+// ?q=<words>   search public playlists
 export async function GET(req: NextRequest) {
+  const q = (req.nextUrl.searchParams.get("q") ?? "").trim().slice(0, 80);
+  if (q) {
+    try {
+      return Response.json({ playlists: await searchYouTubePlaylists(q) });
+    } catch (e) {
+      return Response.json({ error: e instanceof Error ? e.message : "ค้นหาไม่สำเร็จ" }, { status: 502 });
+    }
+  }
   const id = parseYouTubePlaylistId(req.nextUrl.searchParams.get("url") ?? "");
   if (!id) return Response.json({ error: "ลิงก์นี้ไม่ใช่เพลย์ลิสต์ YouTube (ต้องมี list=… ในลิงก์)" }, { status: 400 });
   try {

@@ -1,4 +1,4 @@
-import { getThaiChart, mapLimit, searchArtistDecoys, searchArtistSongs, searchSongs } from "@/lib/apple";
+import { getThaiChart, lookupTracks, mapLimit, searchArtistDecoys, searchArtistSongs, searchSongs } from "@/lib/apple";
 import { buildQuestions, pickAnswers, type PoolTrack, type WantedTrack } from "@/lib/music";
 import { mockPool } from "@/lib/mock";
 import { resolveTrackList, resolveYouTube } from "@/lib/playlist";
@@ -38,11 +38,19 @@ export async function POST(req: Request) {
   try {
     if (process.env.MOCK_MUSIC === "1") {
       pool = mockPool();
-    } else if (source?.kind === "chart") {
-      pool = await getThaiChart(source.size === 50 ? 50 : 100);
-      // Chart songs are mostly by different artists, which makes the choices too easy
-      // (recognise the voice, pick the one by that singer). Pull in other songs by
-      // each answer's artist to use as wrong choices.
+    } else if (source?.kind === "chart" || source?.kind === "custom") {
+      if (source.kind === "chart") {
+        pool = await getThaiChart(source.size === 50 ? 50 : 100);
+      } else {
+        const ids = Array.isArray(source.trackIds) ? source.trackIds.map(String) : [];
+        pool = await lookupTracks(ids);
+        const missing = ids.length - pool.length;
+        if (missing > 0) warnings.push(`มี ${missing} เพลงในเพลย์ลิสต์ที่ไม่มีตัวอย่างแล้ว เลยข้ามไป`);
+        if (pool.length < 4) return Response.json({ error: "เพลย์ลิสต์ต้องมีเพลงที่เล่นได้อย่างน้อย 4 เพลง" }, { status: 422 });
+      }
+      // Songs from a chart or playlist are mostly by different artists, which makes the
+      // choices too easy (recognise the voice, pick the one by that singer). Pull in other
+      // songs by each answer's artist to use as wrong choices.
       answers = pickAnswers(pool, rounds);
       const artists = [...new Set(answers.map((a) => mainArtist(a.artist)))].slice(0, MAX_DECOY_SEARCHES);
       const decoys = await mapLimit(artists, 3, searchArtistDecoys);

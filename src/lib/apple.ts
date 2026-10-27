@@ -57,9 +57,9 @@ function bigArtwork(url?: string) {
   return url?.replace(/\/\d+x\d+bb\./, "/600x600bb.");
 }
 
-export function toPoolTrack(t: ItunesTrack, group: string): PoolTrack | null {
+export function toPoolTrack(t: ItunesTrack, group: string, allowAlt = false): PoolTrack | null {
   if (t.kind !== "song" || !t.previewUrl || !t.trackName || !t.artistName || !t.trackId) return null;
-  if (isAltVersion(t.trackName, t.collectionName)) return null;
+  if (!allowAlt && isAltVersion(t.trackName, t.collectionName)) return null;
   return {
     id: String(t.trackId),
     title: cleanTitle(t.trackName),
@@ -135,6 +135,20 @@ export async function searchArtistDecoys(artist: string): Promise<PoolTrack[]> {
     .map((r) => toPoolTrack(r, `decoy:${artist}`))
     .filter((t): t is PoolTrack => !!t)
     .map((t) => ({ ...t, answerable: false }));
+}
+
+/** Songs the host picked by hand (their own playlist): keep whatever version they chose. */
+export async function lookupTracks(ids: string[]): Promise<PoolTrack[]> {
+  const clean = [...new Set(ids.filter((id) => /^\d{1,15}$/.test(id)))].slice(0, 300);
+  const byId = new Map<string, PoolTrack>();
+  for (let i = 0; i < clean.length; i += 100) {
+    const data = await getJson<{ results?: ItunesTrack[] }>(`https://itunes.apple.com/lookup?id=${clean.slice(i, i + 100).join(",")}&country=${COUNTRY}`);
+    for (const r of data.results ?? []) {
+      const t = toPoolTrack(r, "custom", true);
+      if (t) byId.set(t.id, t);
+    }
+  }
+  return clean.map((id) => byId.get(id)).filter((t): t is PoolTrack => !!t);
 }
 
 /** Plain song search (title + artist), used to match playlist entries to Apple previews. */

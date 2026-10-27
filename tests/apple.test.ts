@@ -1,7 +1,8 @@
 // Apple API parsing with a stubbed fetch (no network needed).
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { getThaiChart, mapLimit, searchArtistDecoys, searchArtistSongs, toPoolTrack } from "../src/lib/apple.ts";
+import { getThaiChart, lookupTracks, mapLimit, searchArtistDecoys, searchArtistSongs, toPoolTrack } from "../src/lib/apple.ts";
+import { searchYouTubePlaylists } from "../src/lib/youtube.ts";
 import { GET as previewGET } from "../src/app/api/preview/route.ts";
 
 const song = (id: number, name: string, extra: Record<string, unknown> = {}) => ({
@@ -102,4 +103,29 @@ test("preview relay only fetches Apple preview hosts", async () => {
   assert.equal(ok.status, 200);
   assert.equal(await ok.text(), "AUDIO");
   assert.equal(calls.length, 1);
+});
+
+test("lookupTracks keeps the host's order and chosen versions, drops junk ids", async () => {
+  const calls = stubFetch([[/itunes\.apple\.com\/lookup\?id=30,10,20&country=th/, { results: [song(10, "หนึ่ง (Live)"), song(20, "สอง"), song(30, "สาม")] }]]);
+  const t = await lookupTracks(["30", "10", "abc", "20", "10"]);
+  assert.deepEqual(t.map((x) => x.id), ["30", "10", "20"]);
+  assert.equal(t[1].title, "หนึ่ง", "live version kept because the host picked it (title cleaned)");
+  assert.equal(calls.length, 1);
+});
+
+test("searchYouTubePlaylists returns playlists with counts and hides tiny ones", async () => {
+  process.env.YOUTUBE_API_KEY = "test-key";
+  stubFetch([
+    [/youtube\/v3\/search\?/, { items: [
+      { id: { playlistId: "PLaaaaaaaaaaaa" }, snippet: { title: "เพลงฮิต 2010", channelTitle: "A", thumbnails: { medium: { url: "m.jpg" } } } },
+      { id: { playlistId: "PLbbbbbbbbbbbb" }, snippet: { title: "สั้นไป", channelTitle: "B" } },
+    ] }],
+    [/youtube\/v3\/playlists\?part=contentDetails/, { items: [
+      { id: "PLaaaaaaaaaaaa", contentDetails: { itemCount: 50 } },
+      { id: "PLbbbbbbbbbbbb", contentDetails: { itemCount: 2 } },
+    ] }],
+  ]);
+  const hits = await searchYouTubePlaylists("เพลงฮิต");
+  assert.deepEqual(hits, [{ id: "PLaaaaaaaaaaaa", title: "เพลงฮิต 2010", channel: "A", thumbnail: "m.jpg", count: 50 }]);
+  delete process.env.YOUTUBE_API_KEY;
 });

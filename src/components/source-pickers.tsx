@@ -148,6 +148,10 @@ export function SpotifyPicker({
   );
 }
 
+type YtHit = { id: string; title: string; channel: string; thumbnail?: string; count?: number };
+
+const looksLikePlaylistLink = (s: string) => /list=|youtube\.com|youtu\.be/i.test(s) || /^(PL|OL|UU|FL)[\w-]{10,}$/.test(s.trim());
+
 export function YouTubePicker({
   value,
   onPick,
@@ -155,22 +159,34 @@ export function YouTubePicker({
   value?: Extract<SongSource, { kind: "youtube" }>;
   onPick: (p: { playlistId: string; name: string }) => void;
 }) {
-  const [url, setUrl] = useState("");
+  const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [info, setInfo] = useState<{ title: string; count: number } | null>(null);
+  const [hits, setHits] = useState<YtHit[] | null>(null);
+  const [picked, setPicked] = useState<{ title: string; count?: number } | null>(null);
 
-  async function check(e: React.FormEvent) {
+  async function submit(e: React.FormEvent) {
     e.preventDefault();
+    const t = text.trim();
+    if (!t) return;
     setBusy(true);
     setError(null);
     try {
-      const res = await fetch(`/api/youtube?url=${encodeURIComponent(url.trim())}`);
-      const d = (await res.json()) as { id?: string; title?: string; count?: number; error?: string };
-      if (!res.ok || !d.id) throw new Error(d.error || "ใช้เพลย์ลิสต์นี้ไม่ได้");
-      if ((d.count ?? 0) < 4) throw new Error("เพลย์ลิสต์นี้มีคลิปน้อยกว่า 4 คลิป");
-      setInfo({ title: d.title ?? "เพลย์ลิสต์ YouTube", count: d.count ?? 0 });
-      onPick({ playlistId: d.id, name: d.title ?? "เพลย์ลิสต์ YouTube" });
+      if (looksLikePlaylistLink(t)) {
+        // Pasted link: check it and select it straight away.
+        const res = await fetch(`/api/youtube?url=${encodeURIComponent(t)}`);
+        const d = (await res.json()) as { id?: string; title?: string; count?: number; error?: string };
+        if (!res.ok || !d.id) throw new Error(d.error || "ใช้เพลย์ลิสต์นี้ไม่ได้");
+        if ((d.count ?? 0) < 4) throw new Error("เพลย์ลิสต์นี้มีคลิปน้อยกว่า 4 คลิป");
+        choose({ id: d.id, title: d.title ?? "เพลย์ลิสต์ YouTube", channel: "", count: d.count });
+        setHits(null);
+      } else {
+        // Words: search public playlists.
+        const res = await fetch(`/api/youtube?q=${encodeURIComponent(t)}`);
+        const d = (await res.json()) as { playlists?: YtHit[]; error?: string };
+        if (!res.ok) throw new Error(d.error || "ค้นหาไม่สำเร็จ");
+        setHits(d.playlists ?? []);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "ใช้เพลย์ลิสต์นี้ไม่ได้");
     } finally {
@@ -178,33 +194,73 @@ export function YouTubePicker({
     }
   }
 
+  function choose(h: YtHit) {
+    setPicked({ title: h.title, count: h.count });
+    onPick({ playlistId: h.id, name: h.title });
+  }
+
   return (
     <div className="space-y-3">
-      <form onSubmit={check} className="flex gap-2">
-        <label htmlFor="yt-url" className="sr-only">
-          ลิงก์เพลย์ลิสต์ YouTube
+      <form onSubmit={submit} className="flex gap-2">
+        <label htmlFor="yt-q" className="sr-only">
+          ค้นหาหรือวางลิงก์เพลย์ลิสต์ YouTube
         </label>
         <input
-          id="yt-url"
-          value={url}
-          onChange={(e) => setUrl(e.target.value)}
-          placeholder="วางลิงก์เพลย์ลิสต์ youtube.com/playlist?list=…"
+          id="yt-q"
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          placeholder="ค้นหา เช่น เพลงฮิต 2010 หรือวางลิงก์เพลย์ลิสต์"
           className="min-w-0 flex-1 rounded-xl border-2 border-stage-2 bg-night px-4 py-3 placeholder:text-muted/60 focus:border-kho focus:outline-none"
         />
-        <Button type="submit" tone="secondary" disabled={busy || !url.trim()} className="!py-3 !text-base">
-          {busy ? "กำลังตรวจ…" : "ใช้เพลย์ลิสต์นี้"}
+        <Button type="submit" tone="secondary" disabled={busy || !text.trim()} className="!py-3 !text-base">
+          {busy ? "กำลังหา…" : looksLikePlaylistLink(text) ? "ใช้ลิงก์นี้" : "ค้นหา"}
         </Button>
       </form>
       {error && <Banner tone="error">{error}</Banner>}
-      {value && (
+
+      {hits && hits.length === 0 && <p className="text-muted">ไม่เจอเพลย์ลิสต์ ลองคำอื่น เช่น ชื่อศิลปิน ยุค หรือแนวเพลง</p>}
+      {hits && hits.length > 0 && (
+        <ul role="radiogroup" aria-label="ผลค้นหาเพลย์ลิสต์" className="grid max-h-96 gap-2 overflow-y-auto pr-1 sm:grid-cols-2">
+          {hits.map((h) => {
+            const on = value?.playlistId === h.id;
+            return (
+              <li key={h.id}>
+                <button
+                  type="button"
+                  role="radio"
+                  aria-checked={on}
+                  onClick={() => choose(h)}
+                  className={`flex w-full items-center gap-3 rounded-xl border-2 p-2 text-left ${on ? "border-good bg-stage-2" : "border-stage-2 bg-night/40 hover:border-muted/50"}`}
+                >
+                  {h.thumbnail ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={h.thumbnail} alt="" className="h-12 w-20 shrink-0 rounded-lg object-cover" />
+                  ) : (
+                    <span className="h-12 w-20 shrink-0 rounded-lg bg-stage-2" />
+                  )}
+                  <span className="min-w-0">
+                    <span className="line-clamp-2 font-medium leading-snug">{h.title}</span>
+                    <span className="block truncate text-sm text-muted">
+                      {h.channel}
+                      {h.count != null && ` · ${h.count} คลิป`}
+                    </span>
+                  </span>
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+
+      {value?.playlistId && (
         <p className="text-good">
-          เลือกแล้ว: {info?.title ?? value.name ?? "เพลย์ลิสต์ YouTube"}
-          {info && <span className="text-muted"> · {info.count} คลิป</span>}
+          เลือกแล้ว: {picked?.title ?? value.name ?? "เพลย์ลิสต์ YouTube"}
+          {picked?.count != null && <span className="text-muted"> · {picked.count} คลิป</span>}
         </p>
       )}
       <p className="text-sm text-muted">
-        เพลย์ลิสต์ต้องเป็นสาธารณะหรือ Unlisted ใช้ Mix อัตโนมัติไม่ได้ ระบบจะจับคู่คลิปกับเพลงบน Apple Music เพื่อเล่นตัวอย่าง คลิปที่หาไม่เจอจะถูกข้าม
-        เพลย์ลิสต์จาก YouTube Music จับคู่ได้แม่นที่สุด
+        ระบบจะจับคู่คลิปกับเพลงบน Apple Music เพื่อเล่นตัวอย่าง คลิปที่ไม่ใช่เพลงหรือหาไม่เจอจะถูกข้าม เพลย์ลิสต์จาก YouTube Music จับคู่ได้แม่นที่สุด
+        ใช้ Mix อัตโนมัติไม่ได้
       </p>
     </div>
   );

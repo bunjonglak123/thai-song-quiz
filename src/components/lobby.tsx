@@ -4,6 +4,7 @@ import { useState } from "react";
 import { PRESETS, presetById } from "@/lib/presets";
 import type { GameSettings, GameState, SongSource } from "@/lib/types";
 import { ArtistPicker } from "./artist-picker";
+import { MyPlaylistPicker } from "./my-playlists";
 import { PresetPicker, SpotifyPicker, YouTubePicker } from "./source-pickers";
 import { Avatar, Banner, Button } from "./ui";
 
@@ -122,18 +123,20 @@ function HostSettings({
   const [artists, setArtists] = useState<string[]>(src.kind === "artists" ? src.artists : []);
   const [presetId, setPresetId] = useState(src.kind === "preset" ? src.id : PRESETS[0].id);
   const [spotify, setSpotify] = useState<Extract<SongSource, { kind: "spotify" }> | undefined>(src.kind === "spotify" ? src : undefined);
+  const [custom, setCustom] = useState<Extract<SongSource, { kind: "custom" }> | undefined>(src.kind === "custom" ? src : undefined);
   const [youtube, setYoutube] = useState<Extract<SongSource, { kind: "youtube" }> | undefined>(src.kind === "youtube" ? src : undefined);
 
   const setSource = (source: SongSource) => onChange({ ...settings, source });
   // An empty selection is stored with a blank id; whatsMissing() then asks the host to pick one.
   const spotifySource = (v = spotify): SongSource => v ?? { kind: "spotify", playlistId: "", name: "" };
   const youtubeSource = (v = youtube): SongSource => v ?? { kind: "youtube", playlistId: "" };
+  const customSource = (v = custom): SongSource => v ?? { kind: "custom", name: "", trackIds: [] };
 
   return (
     <fieldset disabled={disabled} className="space-y-6 disabled:opacity-60">
       <section>
         <h2 className="font-display text-xl">เลือกเพลงจาก</h2>
-        <div role="radiogroup" className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-5">
+        <div role="radiogroup" className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-6">
           <Option
             selected={src.kind === "chart"}
             onClick={() => setSource({ kind: "chart", size: 100 })}
@@ -153,6 +156,12 @@ function HostSettings({
             detail="สุ่มจากศิลปินที่เลือก สูงสุด 8 คน"
           />
           <Option
+            selected={src.kind === "custom"}
+            onClick={() => setSource(customSource())}
+            title="เพลย์ลิสต์ของฉัน"
+            detail="ค้นหาเพลงมาจัดเอง เล่นได้ทุกเพลง"
+          />
+          <Option
             selected={src.kind === "spotify"}
             onClick={() => setSource(spotifySource())}
             title="Spotify playlist"
@@ -162,7 +171,7 @@ function HostSettings({
             selected={src.kind === "youtube"}
             onClick={() => setSource(youtubeSource())}
             title="YouTube playlist"
-            detail="วางลิงก์เพลย์ลิสต์"
+            detail="ค้นหาหรือวางลิงก์เพลย์ลิสต์"
           />
         </div>
 
@@ -182,6 +191,19 @@ function HostSettings({
               onChange={(a) => {
                 setArtists(a);
                 setSource({ kind: "artists", artists: a });
+              }}
+            />
+          )}
+          {src.kind === "custom" && (
+            <MyPlaylistPicker
+              selectedId={src.listId}
+              minSongs={settings.rounds}
+              onPick={(p) => {
+                const v = p
+                  ? { kind: "custom" as const, name: p.name, trackIds: p.songs.map((s) => s.id), listId: p.id }
+                  : { kind: "custom" as const, name: "", trackIds: [] };
+                setCustom(v);
+                setSource(v);
               }}
             />
           )}
@@ -303,7 +325,9 @@ function describe(s: GameSettings) {
           ? `ชุดเพลง: ${presetById(src.id)?.name ?? "-"}`
           : src.kind === "spotify"
             ? `Spotify: ${src.name || "ยังไม่ได้เลือก"}`
-            : `YouTube: ${src.name || "ยังไม่ได้เลือก"}`;
+            : src.kind === "custom"
+              ? `เพลย์ลิสต์ของหัวห้อง: ${src.name || "ยังไม่ได้เลือก"}`
+              : `YouTube: ${src.name || "ยังไม่ได้เลือก"}`;
   const listen = s.listenSeconds ? `ฟังก่อน ${s.listenSeconds} วิ แล้วตอบใน ${s.roundSeconds} วิ` : `ตอบใน ${s.roundSeconds} วิ`;
   return `${what} · ${s.rounds} ข้อ · ${listen}`;
 }
@@ -314,6 +338,7 @@ function whatsMissing(s: GameSettings): string | null {
   if (src.kind === "artists" && !src.artists.length) return "เลือกศิลปินอย่างน้อย 1 คนก่อนเริ่ม";
   if (src.kind === "preset" && !presetById(src.id)) return "เลือกชุดเพลงก่อนเริ่ม";
   if (src.kind === "spotify" && !src.playlistId) return "เลือกเพลย์ลิสต์ Spotify ก่อนเริ่ม";
-  if (src.kind === "youtube" && !src.playlistId) return "วางลิงก์เพลย์ลิสต์ YouTube ก่อนเริ่ม";
+  if (src.kind === "youtube" && !src.playlistId) return "ค้นหาหรือวางลิงก์เพลย์ลิสต์ YouTube ก่อนเริ่ม";
+  if (src.kind === "custom" && src.trackIds.length < 4) return "เลือกหรือสร้างเพลย์ลิสต์ที่มีอย่างน้อย 4 เพลงก่อนเริ่ม";
   return null;
 }

@@ -29,7 +29,9 @@ export type SongSource =
   | { kind: "preset"; id: string }
   /** Host's own Spotify playlist; the host's browser reads it at game start. */
   | { kind: "spotify"; playlistId: string; name: string; count?: number }
-  | { kind: "youtube"; playlistId: string; name?: string };
+  | { kind: "youtube"; playlistId: string; name?: string }
+  /** A playlist the host built in this app (Apple Music track ids). */
+  | { kind: "custom"; name: string; trackIds: string[]; listId?: string };
 
 export type GameSettings = {
   source: SongSource;
