@@ -5,7 +5,8 @@
 import { scoreFor } from "./music.ts";
 import type { AnswerMsg, GameSettings, GameState, HostQuestion, PlayerState, Reveal } from "./types";
 
-export const REVEAL_MS = 6000;
+export const REVEAL_MS = 5000;
+export const STANDINGS_MS = 4500;
 export const GRACE_MS = 2500; // network + audio start slack after the countdown
 export const MAX_PLAYERS = 20;
 
@@ -80,7 +81,7 @@ export class HostEngine {
     } else if (p === "question") {
       const q = this.state.question;
       this.arm(() => this.reveal(), (q?.lockMs ?? 0) + (q?.durationMs ?? 15000) + GRACE_MS);
-    } else if (p === "reveal") {
+    } else if (p === "reveal" || p === "standings") {
       this.arm(() => this.next(), 2500);
     }
   }
@@ -169,6 +170,7 @@ export class HostEngine {
       phase: "question",
       round: i,
       answered: [],
+      livePicks: {},
       reveal: undefined,
       question: {
         id: q.id,
@@ -195,7 +197,7 @@ export class HostEngine {
     if (!(choice >= 0 && choice < s.question.choices.length)) return;
     const ms = Math.min(Math.max(Math.round(Number(msg.ms)) || 0, 0), s.question.durationMs);
     picks[msg.playerId] = { choice, ms };
-    this.commit({ answered: [...s.answered, msg.playerId] });
+    this.commit({ answered: [...s.answered, msg.playerId], livePicks: { ...s.livePicks, [msg.playerId]: choice } });
     this.maybeRevealEarly();
   }
 
@@ -216,28 +218,38 @@ export class HostEngine {
     const picks = this.picks[q.id] ?? {};
     const players: Record<string, PlayerState> = {};
     const outPicks: Reveal["picks"] = {};
+    const before = rankOf(s.players);
     for (const [id, p] of Object.entries(s.players)) {
       const pick = picks[id];
       const correct = !!pick && pick.choice === q.answer;
       const streak = correct ? p.streak + 1 : 0;
       const gain = pick ? scoreFor(correct, pick.ms, s.question.durationMs, streak) : 0;
-      players[id] = { ...p, streak, score: p.score + gain, lastGain: gain };
+      players[id] = { ...p, streak, score: p.score + gain, lastGain: gain, prevRank: before[id] };
       if (pick) outPicks[id] = { ...pick, gain };
     }
     this.commit({
       phase: "reveal",
+      livePicks: undefined,
       players,
       reveal: { questionId: q.id, answer: q.answer, track: q.track, choices: q.choices, picks: outPicks },
     });
     this.arm(() => this.next(), REVEAL_MS);
   }
 
+  /** reveal → standings → next question; the last reveal goes straight to the final results. */
   next() {
-    if (this.state.phase !== "reveal") return;
+    const phase = this.state.phase;
+    if (phase !== "reveal" && phase !== "standings") return;
     this.disarm();
     const i = this.state.round + 1;
-    if (i < this.questions.length) this.ask(i);
-    else this.commit({ phase: "final", question: undefined });
+    if (i >= this.questions.length) {
+      this.commit({ phase: "final", question: undefined });
+    } else if (phase === "reveal") {
+      this.commit({ phase: "standings" });
+      this.arm(() => this.next(), STANDINGS_MS);
+    } else {
+      this.ask(i);
+    }
   }
 
   backToLobby() {
@@ -246,7 +258,7 @@ export class HostEngine {
     this.questions = [];
     this.picks = {};
     const players = resetScores(this.state.players, true);
-    this.commit({ phase: "lobby", players, round: 0, totalRounds: 0, question: undefined, reveal: undefined, answered: [], notice: undefined, error: undefined });
+    this.commit({ phase: "lobby", players, round: 0, totalRounds: 0, question: undefined, reveal: undefined, answered: [], livePicks: undefined, notice: undefined, error: undefined });
   }
 }
 
@@ -254,11 +266,21 @@ function newPlayer(id: string, name: string): PlayerState {
   return { id, name: name.slice(0, 16), score: 0, streak: 0, online: true };
 }
 
+/** 1-based competition ranks by score (ties share a rank). */
+export function rankOf(players: Record<string, PlayerState>): Record<string, number> {
+  const sorted = Object.values(players).sort((a, b) => b.score - a.score);
+  const out: Record<string, number> = {};
+  sorted.forEach((p, i) => {
+    out[p.id] = i > 0 && sorted[i - 1].score === p.score ? out[sorted[i - 1].id] : i + 1;
+  });
+  return out;
+}
+
 function resetScores(players: Record<string, PlayerState>, dropOffline: boolean) {
   const out: Record<string, PlayerState> = {};
   for (const [id, p] of Object.entries(players)) {
     if (dropOffline && !p.online) continue;
-    out[id] = { ...p, score: 0, streak: 0, lastGain: undefined };
+    out[id] = { ...p, score: 0, streak: 0, lastGain: undefined, prevRank: undefined };
   }
   return out;
 }

@@ -42,6 +42,7 @@ export type PlayerState = {
   streak: number;
   online: boolean;
   lastGain?: number;
+  prevRank?: number; // 1-based rank before the last question was scored
 };
 
 export type PublicQuestion = {
@@ -62,7 +63,7 @@ export type Reveal = {
   picks: Record<string, { choice: number; gain: number; ms: number }>;
 };
 
-export type Phase = "lobby" | "loading" | "question" | "reveal" | "final";
+export type Phase = "lobby" | "loading" | "question" | "reveal" | "standings" | "final";
 
 /** The full game state the host broadcasts. Contains no future answers. */
 export type GameState = {
@@ -75,6 +76,8 @@ export type GameState = {
   totalRounds: number;
   question?: PublicQuestion;
   answered: string[]; // player ids who answered current question
+  /** Who picked what so far. The UI only shows it to players who have already answered. */
+  livePicks?: Record<string, number>;
   reveal?: Reveal;
   error?: string;
   notice?: string;

@@ -59,6 +59,12 @@ export function QuestionView({
   const answerLeft = startedAt == null ? q.durationMs : Math.max(0, q.durationMs - Math.max(0, sinceStart - q.lockMs));
   const timeUp = !listening && answerLeft <= 0;
   const online = Object.values(state.players).filter((p) => p.online);
+  // Other players' picks become visible only once you've locked in your own answer.
+  const showPicks = answered != null;
+  const pickersOf = (i: number) =>
+    Object.entries(state.livePicks ?? {})
+      .filter(([, c]) => c === i)
+      .map(([id]) => ({ id, name: id === meId ? "คุณ" : (state.players[id]?.name ?? "?") }));
   const answeredCount = state.answered.filter((id) => state.players[id]?.online).length;
 
   function pick(i: number) {
@@ -132,7 +138,18 @@ export function QuestionView({
                   {listening ? (
                     <span aria-hidden className="h-5 w-2/3 rounded-full bg-deep/15" />
                   ) : (
-                    <span className="min-w-0 font-display text-xl leading-snug break-words md:text-2xl">{c.title}</span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block font-display text-xl leading-snug break-words md:text-2xl">{c.title}</span>
+                      {showPicks && pickersOf(i).length > 0 && (
+                        <span className="mt-1.5 flex flex-wrap gap-1">
+                          {pickersOf(i).map((p) => (
+                            <span key={p.id} className={`rounded-full px-2 py-0.5 text-sm ${p.id === meId ? "bg-deep text-ink" : "bg-deep/15"}`}>
+                              {p.name}
+                            </span>
+                          ))}
+                        </span>
+                      )}
+                    </span>
                   )}
                 </button>
               </li>
@@ -161,10 +178,17 @@ export function QuestionView({
             .sort((a, b) => b.score - a.score)
             .map((p) => {
               const done = state.answered.includes(p.id);
+              const pick = showPicks ? state.livePicks?.[p.id] : undefined;
               return (
                 <li key={p.id} className={`flex items-center gap-3 px-4 py-3 ${p.id === meId ? "bg-stage-2" : ""}`}>
                   <span className="min-w-0 flex-1 truncate">{p.name}</span>
-                  <span className={`text-sm ${done ? "text-good" : "text-muted"}`}>{done ? "ตอบแล้ว" : "กำลังคิด"}</span>
+                  {pick != null ? (
+                    <span className={`grid size-7 place-items-center rounded-lg font-display text-deep ${CHOICE_BG[pick]}`} aria-label={`เลือกข้อ ${CHOICE_MARKS[pick]}`}>
+                      {CHOICE_MARKS[pick]}
+                    </span>
+                  ) : (
+                    <span className={`text-sm ${done ? "text-good" : "text-muted"}`}>{done ? "ตอบแล้ว" : "กำลังคิด"}</span>
+                  )}
                   <span className="w-14 text-right font-display tabular-nums">{p.score}</span>
                 </li>
               );
@@ -246,11 +270,11 @@ export function RevealView({ state, meId, isHost, onNext }: { state: GameState; 
       </div>
 
       <aside className="flex flex-col gap-4 lg:pt-11">
-        <h2 className="hidden font-display text-lg text-muted lg:block">คะแนน</h2>
-        <Scoreboard state={state} meId={meId} showGain />
+        <h2 className="font-display text-lg text-muted">ข้อนี้</h2>
+        <RoundResults state={state} meId={meId} />
         {isHost && (
           <Button tone="secondary" onClick={onNext}>
-            {isLast ? "ดูผลรวม" : "ข้อต่อไป"}
+            {isLast ? "ดูผลรวม" : "ดูอันดับ"}
           </Button>
         )}
       </aside>
@@ -287,4 +311,120 @@ export function Scoreboard({ state, meId, showGain = false }: { state: GameState
       ))}
     </ol>
   );
+}
+
+/** Who got this question right, fastest first. */
+function RoundResults({ state, meId }: { state: GameState; meId: string }) {
+  const r = state.reveal!;
+  const rows = Object.values(state.players)
+    .filter((p) => p.online || r.picks[p.id])
+    .map((p) => ({ p, pick: r.picks[p.id] }))
+    .sort((a, b) => (b.pick?.gain ?? -1) - (a.pick?.gain ?? -1) || (a.pick?.ms ?? 1e9) - (b.pick?.ms ?? 1e9));
+  return (
+    <ol className="divide-y divide-stage-2 overflow-hidden rounded-2xl bg-stage" aria-label="ผลข้อนี้">
+      {rows.map(({ p, pick }) => {
+        const correct = pick && pick.choice === r.answer;
+        return (
+          <li key={p.id} className={`flex items-center gap-3 px-4 py-2.5 ${p.id === meId ? "bg-stage-2" : ""}`}>
+            <span className={`w-5 text-center font-display ${correct ? "text-good" : pick ? "text-bad" : "text-muted"}`} aria-hidden>
+              {correct ? "✓" : pick ? "✗" : "–"}
+            </span>
+            <span className="min-w-0 flex-1 truncate">{p.name}</span>
+            {pick && <span className="text-sm text-muted tabular-nums">{(pick.ms / 1000).toFixed(1)} วิ</span>}
+            <span className={`w-14 text-right font-display tabular-nums ${correct ? "text-good" : "text-muted"}`}>
+              {correct ? `+${pick!.gain}` : "0"}
+            </span>
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
+const ROW_H = 60; // px, fixed so rows can slide between positions
+
+/** Leaderboard between questions: rows start at their old rank and slide to the new one. */
+export function StandingsView({
+  state,
+  meId,
+  isHost,
+  onNext,
+}: {
+  state: GameState;
+  meId: string;
+  isHost: boolean;
+  onNext: () => void;
+}) {
+  const ranks = rankNow(state);
+  const rows = Object.values(state.players).filter((p) => p.online || p.score > 0);
+  const [settled, setSettled] = useState(false);
+  useEffect(() => {
+    const t = setTimeout(() => setSettled(true), 700);
+    return () => clearTimeout(t);
+  }, []);
+
+  // Order rows by previous rank first, then by the new rank once settled.
+  const oldOrder = [...rows].sort((a, b) => (a.prevRank ?? 99) - (b.prevRank ?? 99) || b.score - (b.lastGain ?? 0) - (a.score - (a.lastGain ?? 0)));
+  const newOrder = [...rows].sort((a, b) => b.score - a.score);
+  const slot = new Map((settled ? newOrder : oldOrder).map((p, i) => [p.id, i]));
+  const me = state.players[meId];
+  const myMove = me?.prevRank && ranks[meId] ? me.prevRank - ranks[meId] : 0;
+
+  return (
+    <div className="mx-auto flex w-full max-w-2xl flex-col gap-6">
+      <div>
+        <p className="font-display text-lg text-muted">
+          หลังข้อ {state.round + 1} จาก {state.totalRounds}
+        </p>
+        <h2 className="mt-1 font-display text-4xl lg:text-5xl">อันดับตอนนี้</h2>
+        {me && ranks[meId] && (
+          <p className="mt-2 text-lg text-muted" aria-live="polite">
+            คุณอยู่อันดับ {ranks[meId]}
+            {myMove > 0 && <span className="text-good"> ขึ้นมา {myMove} อันดับ</span>}
+            {myMove < 0 && <span className="text-bad"> ตกลง {-myMove} อันดับ</span>}
+          </p>
+        )}
+      </div>
+
+      <ol className="relative" style={{ height: rows.length * ROW_H }} aria-label="อันดับ">
+        {newOrder.map((p) => {
+          const rank = ranks[p.id];
+          const move = p.prevRank ? p.prevRank - rank : 0;
+          const medal = rank === 1 ? "bg-kho text-deep" : rank === 2 ? "bg-ngo text-deep" : rank === 3 ? "bg-ko text-deep" : "bg-stage-2";
+          return (
+            <li
+              key={p.id}
+              className={`standing-row absolute inset-x-0 flex items-center gap-3 rounded-2xl px-3 ${p.id === meId ? "bg-stage-2 ring-2 ring-kho" : "bg-stage"}`}
+              style={{ height: ROW_H - 8, transform: `translateY(${(slot.get(p.id) ?? 0) * ROW_H}px)` }}
+            >
+              <span className={`grid size-9 shrink-0 place-items-center rounded-xl font-display text-lg ${medal}`}>{rank}</span>
+              <span className={`min-w-0 flex-1 truncate text-lg ${p.online ? "" : "text-muted line-through"}`}>{p.name}</span>
+              {settled && move !== 0 && (
+                <span className={`text-sm ${move > 0 ? "text-good" : "text-bad"}`} aria-label={move > 0 ? `ขึ้น ${move}` : `ลง ${-move}`}>
+                  {move > 0 ? `▲${move}` : `▼${-move}`}
+                </span>
+              )}
+              {!!p.lastGain && <span className="text-sm text-good tabular-nums">+{p.lastGain}</span>}
+              <span className="w-16 text-right font-display text-lg tabular-nums">{p.score}</span>
+            </li>
+          );
+        })}
+      </ol>
+
+      {isHost && (
+        <Button tone="secondary" onClick={onNext} className="self-start">
+          ข้อต่อไป
+        </Button>
+      )}
+    </div>
+  );
+}
+
+function rankNow(state: GameState) {
+  const sorted = Object.values(state.players).sort((a, b) => b.score - a.score);
+  const out: Record<string, number> = {};
+  sorted.forEach((p, i) => {
+    out[p.id] = i > 0 && sorted[i - 1].score === p.score ? out[sorted[i - 1].id] : i + 1;
+  });
+  return out;
 }

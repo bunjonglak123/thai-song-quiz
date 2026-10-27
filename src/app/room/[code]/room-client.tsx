@@ -5,7 +5,7 @@ import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { FinalView } from "@/components/final";
 import { Lobby } from "@/components/lobby";
-import { QuestionView, RevealView } from "@/components/play";
+import { QuestionView, RevealView, StandingsView } from "@/components/play";
 import { Banner, Button } from "@/components/ui";
 import { getVolume, setVolume, stopClip, unlockAudio } from "@/lib/audio";
 import { isHostOf, normalizeCode, playerId, saveName, savedName } from "@/lib/identity";
@@ -117,6 +117,8 @@ function Game({ code, me, isHost }: { code: string; me: Member; isHost: boolean 
         <QuestionView key={state.question.id} state={state} meId={me.id} isHost={isHost} onAnswer={answer} onRevealNow={host.revealNow} />
       ) : state.phase === "reveal" && state.reveal ? (
         <RevealView state={state} meId={me.id} isHost={isHost} onNext={host.next} />
+      ) : state.phase === "standings" ? (
+        <StandingsView key={state.round} state={state} meId={me.id} isHost={isHost} onNext={host.next} />
       ) : state.phase === "final" ? (
         <FinalView state={state} meId={me.id} isHost={isHost} onAgain={host.start} onLobby={host.backToLobby} />
       ) : null}

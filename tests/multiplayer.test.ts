@@ -79,10 +79,13 @@ test("host + 2 players play a 2-round game over the local transport", async () =
   // Player B disconnects; next round must not wait for them.
   b.t.close();
   engine.next();
+  await until(() => a.last().phase === "standings");
+  engine.next();
   await until(() => a.last().phase === "question" && a.last().round === 1);
   await until(() => engine.state.players.pb?.online === false, 7000);
   const q2 = a.last().question!;
   a.t.send("answer", { questionId: q2.id, choice: 1, ms: 100 });
+  await until(() => a.last().livePicks?.pa === 1);
   engine.answer({ playerId: "host", questionId: q2.id, choice: 2, ms: 100 });
   await until(() => a.last().phase === "reveal");
   engine.next();

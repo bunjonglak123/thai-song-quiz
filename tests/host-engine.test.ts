@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { HostEngine, REVEAL_MS, GRACE_MS, type HostSnapshot } from "../src/lib/host-engine.ts";
+import { HostEngine, REVEAL_MS, STANDINGS_MS, GRACE_MS, rankOf, type HostSnapshot } from "../src/lib/host-engine.ts";
 import type { GameState, HostQuestion } from "../src/lib/types.ts";
 
 function q(i: number, answer = 1): HostQuestion {
@@ -75,6 +75,7 @@ test("full game: join, answer, early reveal, scores, final", async () => {
   const qid = eng.state.question!.id;
   eng.answer({ playerId: "p1", questionId: qid, choice: 1, ms: 0 }); // correct, instant
   eng.answer({ playerId: "p1", questionId: qid, choice: 0, ms: 0 }); // duplicate ignored
+  assert.deepEqual(eng.state.livePicks, { p1: 1 }, "live picks track the first answer only");
   assert.equal(eng.state.phase, "question");
   eng.answer({ playerId: "host", questionId: qid, choice: 2, ms: 3000 }); // wrong
   timers.advance(700); // early reveal after everyone answered
@@ -84,10 +85,18 @@ test("full game: join, answer, early reveal, scores, final", async () => {
   assert.equal(eng.state.reveal!.answer, 1);
   assert.equal(eng.state.reveal!.picks.p1.gain, 1000);
   assert.equal(eng.state.reveal!.choices![1].artist, "A", "artists shown after the reveal");
+  assert.equal(eng.state.livePicks, undefined, "live picks cleared at the reveal");
 
+  // Leaderboard between questions, with rank movement
   timers.advance(REVEAL_MS);
+  assert.equal(eng.state.phase, "standings");
+  assert.equal(eng.state.players.p1.prevRank, 1, "everyone tied at 0 before the first question");
+  assert.equal(rankOf(eng.state.players).p1, 1);
+  assert.equal(rankOf(eng.state.players).host, 2);
+  timers.advance(STANDINGS_MS);
   assert.equal(eng.state.phase, "question");
   assert.equal(eng.state.round, 1);
+  assert.deepEqual(eng.state.livePicks, {});
 
   // Nobody answers: timeout reveal
   timers.advance(3000 + 15000 + GRACE_MS);
@@ -179,4 +188,24 @@ test("play again resets scores", async () => {
   await eng.start();
   assert.equal(eng.state.phase, "question");
   assert.equal(eng.state.players.host.score, 0);
+});
+
+test("rankOf gives tied players the same rank", () => {
+  const p = (id: string, score: number) => ({ id, name: id, score, streak: 0, online: true });
+  assert.deepEqual(rankOf({ a: p("a", 900), b: p("b", 900), c: p("c", 500), d: p("d", 0) }), { a: 1, b: 1, c: 3, d: 4 });
+});
+
+test("host can skip the reveal and the standings", async () => {
+  const { eng } = setup(2);
+  eng.syncMembers([{ id: "host", name: "h" }]);
+  await eng.start();
+  eng.reveal();
+  eng.next();
+  assert.equal(eng.state.phase, "standings");
+  eng.next();
+  assert.equal(eng.state.phase, "question");
+  assert.equal(eng.state.round, 1);
+  eng.reveal();
+  eng.next();
+  assert.equal(eng.state.phase, "final", "last question skips the standings");
 });
