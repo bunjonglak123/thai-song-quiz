@@ -5,7 +5,7 @@
 
 import { createClient, type RealtimeChannel, type SupabaseClient } from "@supabase/supabase-js";
 
-export type Member = { id: string; name: string };
+export type Member = { id: string; name: string; color?: string };
 type Msg = { type: string; from: string; data: unknown };
 type Handler = (data: unknown, from: string) => void;
 
@@ -52,7 +52,7 @@ abstract class Base {
   }
   protected setMembers(m: Member[]) {
     m.sort((a, b) => a.id.localeCompare(b.id));
-    const same = m.length === this.members.length && m.every((x, i) => x.id === this.members[i].id && x.name === this.members[i].name);
+    const same = m.length === this.members.length && m.every((x, i) => x.id === this.members[i].id && x.name === this.members[i].name && x.color === this.members[i].color);
     if (same) return;
     this.members = m;
     this.memberCbs.forEach((cb) => cb(m));
@@ -79,14 +79,14 @@ class SupabaseTransport extends Base implements RoomTransport {
       this.ch = ch;
       ch.on("broadcast", { event: "msg" }, ({ payload }) => this.emit(payload as Msg));
       ch.on("presence", { event: "sync" }, () => {
-        const st = ch.presenceState<{ name: string }>();
-        this.setMembers(Object.entries(st).map(([id, metas]) => ({ id, name: metas[0]?.name ?? "?" })));
+        const st = ch.presenceState<{ name: string; color?: string }>();
+        this.setMembers(Object.entries(st).map(([id, metas]) => ({ id, name: metas[0]?.name ?? "?", color: metas[0]?.color })));
       });
       let settled = false;
       ch.subscribe(async (status, err) => {
         if (status === "SUBSCRIBED") {
           this.ready = true;
-          await ch.track({ name: this.me.name });
+          await ch.track({ name: this.me.name, color: this.me.color });
           this.queue.splice(0).forEach((m) => this.push(m));
           if (!settled) {
             settled = true;
@@ -120,7 +120,7 @@ class SupabaseTransport extends Base implements RoomTransport {
 class LocalTransport extends Base implements RoomTransport {
   readonly kind = "local" as const;
   private bc: BroadcastChannel | null = null;
-  private seen = new Map<string, { name: string; at: number }>();
+  private seen = new Map<string, { name: string; color?: string; at: number }>();
   private timer: ReturnType<typeof setInterval> | null = null;
   private room: string;
   private me: Member;
@@ -134,7 +134,8 @@ class LocalTransport extends Base implements RoomTransport {
     this.bc.onmessage = (e) => {
       const m = e.data as Msg;
       if (m.type === "__hb") {
-        this.seen.set(m.from, { name: String(m.data), at: Date.now() });
+        const d = m.data as { name?: string; color?: string };
+        this.seen.set(m.from, { name: String(d?.name ?? "?"), color: d?.color, at: Date.now() });
         this.refresh();
       } else if (m.type === "__bye") {
         this.seen.delete(m.from);
@@ -142,8 +143,8 @@ class LocalTransport extends Base implements RoomTransport {
       } else this.emit(m);
     };
     const beat = () => {
-      this.seen.set(this.me.id, { name: this.me.name, at: Date.now() });
-      this.bc?.postMessage({ type: "__hb", from: this.me.id, data: this.me.name });
+      this.seen.set(this.me.id, { name: this.me.name, color: this.me.color, at: Date.now() });
+      this.bc?.postMessage({ type: "__hb", from: this.me.id, data: { name: this.me.name, color: this.me.color } });
       this.refresh();
     };
     beat();
@@ -154,7 +155,7 @@ class LocalTransport extends Base implements RoomTransport {
   private refresh() {
     const now = Date.now();
     for (const [id, v] of this.seen) if (now - v.at > 5000) this.seen.delete(id);
-    this.setMembers([...this.seen].map(([id, v]) => ({ id, name: v.name })));
+    this.setMembers([...this.seen].map(([id, v]) => ({ id, name: v.name, color: v.color })));
   }
   send(type: string, data: unknown) {
     this.bc?.postMessage({ type, from: this.me.id, data });

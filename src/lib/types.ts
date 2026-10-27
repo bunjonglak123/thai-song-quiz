@@ -38,6 +38,7 @@ export type GameSettings = {
 export type PlayerState = {
   id: string;
   name: string;
+  color?: string; // avatar colour the player picked, #rrggbb
   score: number;
   streak: number;
   online: boolean;

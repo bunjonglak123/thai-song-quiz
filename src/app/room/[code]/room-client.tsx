@@ -6,9 +6,9 @@ import { useEffect, useState } from "react";
 import { FinalView } from "@/components/final";
 import { Lobby } from "@/components/lobby";
 import { QuestionView, RevealView, StandingsView } from "@/components/play";
-import { Banner, Button } from "@/components/ui";
+import { Avatar, Banner, Button, ColorPicker } from "@/components/ui";
 import { getVolume, setVolume, stopClip, unlockAudio } from "@/lib/audio";
-import { isHostOf, normalizeCode, playerId, saveName, savedName } from "@/lib/identity";
+import { isHostOf, normalizeCode, PLAYER_COLORS, playerId, saveColor, savedColor, saveName, savedName } from "@/lib/identity";
 import type { Member } from "@/lib/transport";
 import { useMounted } from "@/lib/use-mounted";
 import { useRoom } from "@/lib/use-room";
@@ -25,6 +25,7 @@ function Room({ code }: { code: string }) {
   const [me, setMe] = useState<Member | null>(null);
   const [isHost] = useState(() => isHostOf(code));
   const [name, setName] = useState(savedName);
+  const [color, setColor] = useState(savedColor);
 
   // Every visit goes through this tap: it unlocks audio on phones.
   function join(e: React.FormEvent) {
@@ -32,8 +33,9 @@ function Room({ code }: { code: string }) {
     const n = name.trim().slice(0, 16);
     if (!n) return;
     saveName(n);
+    saveColor(color);
     unlockAudio();
-    setMe({ id: playerId(), name: n });
+    setMe({ id: playerId(), name: n, color });
   }
 
   if (!me) {
@@ -48,15 +50,20 @@ function Room({ code }: { code: string }) {
             <label htmlFor="jname" className="mt-6 text-[15px] text-muted md:mt-0">
               ชื่อที่เพื่อนจะเห็น
             </label>
-            <input
-              id="jname"
-              value={name}
-              maxLength={16}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="เช่น ภานุ"
-              autoComplete="nickname"
-              className="rounded-2xl border-2 border-stage-2 bg-stage px-4 py-3.5 text-lg placeholder:text-muted/60 focus:border-kho focus:outline-none"
-            />
+            <div className="flex items-center gap-3">
+              <Avatar name={name || "?"} color={color} size="lg" />
+              <input
+                id="jname"
+                value={name}
+                maxLength={16}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="เช่น ภานุ"
+                autoComplete="nickname"
+                className="min-w-0 flex-1 rounded-2xl border-2 border-stage-2 bg-stage px-4 py-3.5 text-lg placeholder:text-muted/60 focus:border-kho focus:outline-none md:bg-night"
+              />
+            </div>
+            <p className="text-[15px] text-muted">สีประจำตัว</p>
+            <ColorPicker colors={PLAYER_COLORS} value={color} onChange={setColor} name={name} />
             <Button type="submit" disabled={!name.trim()}>
               {isHost ? "เปิดห้อง" : "เข้าห้อง"}
             </Button>

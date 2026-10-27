@@ -2,7 +2,7 @@
 
 import type { GameState } from "@/lib/types";
 import { Scoreboard } from "./play";
-import { Button } from "./ui";
+import { Avatar, Button } from "./ui";
 
 export function FinalView({
   state,
@@ -31,6 +31,7 @@ export function FinalView({
           {!top || top.score === 0 ? "ไม่มีใครได้คะแนนเลย" : tie ? "เสมอกันที่หนึ่ง" : `${top.name} ชนะ`}
         </h2>
         {top && top.score > 0 && <p className="mt-1 font-display text-2xl text-kho tabular-nums lg:text-4xl">{top.score} คะแนน</p>}
+        {top && top.score > 0 && !tie && <Avatar name={top.name} color={top.color} size="lg" className="mt-4" />}
         {myRank > 1 && <p className="mt-3 text-muted">คุณได้อันดับ {myRank}</p>}
       </div>
 

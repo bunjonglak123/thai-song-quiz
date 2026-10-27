@@ -2,8 +2,8 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { Button, CHOICE_BG, CHOICE_MARKS } from "@/components/ui";
-import { markHost, newRoomCode, normalizeCode, saveName, savedName } from "@/lib/identity";
+import { Avatar, Button, CHOICE_BG, CHOICE_MARKS, ColorPicker } from "@/components/ui";
+import { markHost, newRoomCode, normalizeCode, PLAYER_COLORS, saveColor, savedColor, saveName, savedName } from "@/lib/identity";
 import { useMounted } from "@/lib/use-mounted";
 
 export default function Home() {
@@ -13,6 +13,7 @@ export default function Home() {
 function HomeForm() {
   const router = useRouter();
   const [name, setName] = useState(savedName);
+  const [color, setColor] = useState(savedColor);
   const [code, setCode] = useState("");
   const [nameError, setNameError] = useState(false);
 
@@ -24,6 +25,7 @@ function HomeForm() {
       return null;
     }
     saveName(n);
+    saveColor(color);
     return n;
   }
 
@@ -66,7 +68,9 @@ function HomeForm() {
           <label htmlFor="name" className="block text-[15px] text-muted">
             ชื่อที่เพื่อนจะเห็น
           </label>
-          <input
+          <div className="mt-2 flex items-center gap-3">
+            <Avatar name={name || "?"} color={color} size="lg" />
+            <input
             id="name"
             value={name}
             maxLength={16}
@@ -78,13 +82,21 @@ function HomeForm() {
             placeholder="เช่น ภานุ"
             aria-invalid={nameError}
             aria-describedby={nameError ? "name-err" : undefined}
-            className="mt-2 w-full rounded-2xl border-2 border-stage-2 bg-stage px-4 py-3.5 text-lg placeholder:text-muted/60 focus:border-kho focus:outline-none md:bg-night"
-          />
+            className="min-w-0 flex-1 rounded-2xl border-2 border-stage-2 bg-stage px-4 py-3.5 text-lg placeholder:text-muted/60 focus:border-kho focus:outline-none md:bg-night"
+            />
+          </div>
           {nameError && (
             <p id="name-err" className="mt-2 text-bad">
               ใส่ชื่อก่อนเข้าห้อง
             </p>
           )}
+
+          <p id="color-label" className="mt-5 text-[15px] text-muted">
+            สีประจำตัว
+          </p>
+          <div className="mt-2" aria-labelledby="color-label">
+            <ColorPicker colors={PLAYER_COLORS} value={color} onChange={setColor} name={name} />
+          </div>
 
           <Button className="mt-6 w-full" onClick={create}>
             สร้างห้องใหม่

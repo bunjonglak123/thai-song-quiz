@@ -39,10 +39,11 @@ export function useRoom(code: string, me: Member | null, isHost: boolean) {
   const tRef = useRef<RoomTransport | null>(null);
   const meId = me?.id;
   const meName = me?.name;
+  const meColor = me?.color;
 
   useEffect(() => {
     if (!meId || !meName) return;
-    const t = createTransport(code, { id: meId, name: meName });
+    const t = createTransport(code, { id: meId, name: meName, color: meColor });
     tRef.current = t;
     let engine: HostEngine | null = null;
     let gotState = false;
@@ -56,6 +57,7 @@ export function useRoom(code: string, me: Member | null, isHost: boolean) {
         {
           hostId: meId,
           hostName: meName,
+          hostColor: meColor,
           onChange: (s) => {
             setState(s);
             t.send("state", s);
@@ -124,7 +126,7 @@ export function useRoom(code: string, me: Member | null, isHost: boolean) {
       t.close();
       tRef.current = null;
     };
-  }, [code, meId, meName, isHost]);
+  }, [code, meId, meName, meColor, isHost]);
 
   const answer = useCallback(
     (questionId: string, choice: number, ms: number) => {

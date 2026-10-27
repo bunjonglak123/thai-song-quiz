@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { playClip } from "@/lib/audio";
 import type { GameState, PublicQuestion } from "@/lib/types";
-import { Button, CHOICE_BG, CHOICE_MARKS, Equalizer } from "./ui";
+import { Avatar, Button, CHOICE_BG, CHOICE_MARKS, Equalizer } from "./ui";
 
 export function QuestionView({
   state,
@@ -64,7 +64,7 @@ export function QuestionView({
   const pickersOf = (i: number) =>
     Object.entries(state.livePicks ?? {})
       .filter(([, c]) => c === i)
-      .map(([id]) => ({ id, name: id === meId ? "คุณ" : (state.players[id]?.name ?? "?") }));
+      .map(([id]) => ({ id, name: state.players[id]?.name ?? "?", color: state.players[id]?.color }));
   const answeredCount = state.answered.filter((id) => state.players[id]?.online).length;
 
   function pick(i: number) {
@@ -141,11 +141,9 @@ export function QuestionView({
                     <span className="min-w-0 flex-1">
                       <span className="block font-display text-xl leading-snug break-words md:text-2xl">{c.title}</span>
                       {showPicks && pickersOf(i).length > 0 && (
-                        <span className="mt-1.5 flex flex-wrap gap-1">
+                        <span className="mt-2 flex flex-wrap gap-1.5" aria-label={`เลือกข้อนี้: ${pickersOf(i).map((p) => p.name).join(", ")}`}>
                           {pickersOf(i).map((p) => (
-                            <span key={p.id} className={`rounded-full px-2 py-0.5 text-sm ${p.id === meId ? "bg-deep text-ink" : "bg-deep/15"}`}>
-                              {p.name}
-                            </span>
+                            <Avatar key={p.id} name={p.name} color={p.color} size="sm" className="ring-2 ring-deep" ring={p.id === meId} />
                           ))}
                         </span>
                       )}
@@ -181,6 +179,7 @@ export function QuestionView({
               const pick = showPicks ? state.livePicks?.[p.id] : undefined;
               return (
                 <li key={p.id} className={`flex items-center gap-3 px-4 py-3 ${p.id === meId ? "bg-stage-2" : ""}`}>
+                  <Avatar name={p.name} color={p.color} />
                   <span className="min-w-0 flex-1 truncate">{p.name}</span>
                   {pick != null ? (
                     <span className={`grid size-7 place-items-center rounded-lg font-display text-deep ${CHOICE_BG[pick]}`} aria-label={`เลือกข้อ ${CHOICE_MARKS[pick]}`}>
@@ -209,7 +208,7 @@ export function RevealView({ state, meId, isHost, onNext }: { state: GameState; 
   const pickersOf = (i: number) =>
     Object.entries(r.picks)
       .filter(([, p]) => p.choice === i)
-      .map(([id]) => state.players[id]?.name ?? "?");
+      .map(([id]) => ({ id, name: state.players[id]?.name ?? "?", color: state.players[id]?.color }));
 
   return (
     <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_22rem] lg:gap-10">
@@ -260,7 +259,13 @@ export function RevealView({ state, meId, isHost, onNext }: { state: GameState; 
                     {c.title}
                     {c.artist && <span className="font-normal opacity-70"> – {c.artist}</span>}
                   </span>
-                  {names.length > 0 && <span className="block truncate text-sm opacity-80">{names.join(", ")}</span>}
+                  {names.length > 0 && (
+                    <span className="mt-1.5 flex flex-wrap gap-1" aria-label={`เลือกข้อนี้: ${names.map((p) => p.name).join(", ")}`}>
+                      {names.map((p) => (
+                        <Avatar key={p.id} name={p.name} color={p.color} size="xs" className="ring-2 ring-deep/40" />
+                      ))}
+                    </span>
+                  )}
                 </span>
                 {isAns && <span className="shrink-0 font-display">เฉลย</span>}
               </li>
@@ -303,6 +308,7 @@ export function Scoreboard({ state, meId, showGain = false }: { state: GameState
       {rows.map((p, i) => (
         <li key={p.id} className={`flex items-center gap-3 px-4 py-2.5 ${p.id === meId ? "bg-stage-2" : ""}`}>
           <span className="w-6 text-right font-display text-muted">{i + 1}</span>
+          <Avatar name={p.name} color={p.color} />
           <span className={`min-w-0 flex-1 truncate ${p.online ? "" : "text-muted line-through"}`}>{p.name}</span>
           {showGain && !!p.lastGain && <span className="text-sm text-good">+{p.lastGain}</span>}
           {p.streak >= 2 && <span className="text-sm text-kho">ติด {p.streak}</span>}
@@ -329,6 +335,7 @@ function RoundResults({ state, meId }: { state: GameState; meId: string }) {
             <span className={`w-5 text-center font-display ${correct ? "text-good" : pick ? "text-bad" : "text-muted"}`} aria-hidden>
               {correct ? "✓" : pick ? "✗" : "–"}
             </span>
+            <Avatar name={p.name} color={p.color} />
             <span className="min-w-0 flex-1 truncate">{p.name}</span>
             {pick && <span className="text-sm text-muted tabular-nums">{(pick.ms / 1000).toFixed(1)} วิ</span>}
             <span className={`w-14 text-right font-display tabular-nums ${correct ? "text-good" : "text-muted"}`}>
@@ -398,6 +405,7 @@ export function StandingsView({
               style={{ height: ROW_H - 8, transform: `translateY(${(slot.get(p.id) ?? 0) * ROW_H}px)` }}
             >
               <span className={`grid size-9 shrink-0 place-items-center rounded-xl font-display text-lg ${medal}`}>{rank}</span>
+              <Avatar name={p.name} color={p.color} size="md" />
               <span className={`min-w-0 flex-1 truncate text-lg ${p.online ? "" : "text-muted line-through"}`}>{p.name}</span>
               {settled && move !== 0 && (
                 <span className={`text-sm ${move > 0 ? "text-good" : "text-bad"}`} aria-label={move > 0 ? `ขึ้น ${move}` : `ลง ${-move}`}>

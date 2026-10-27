@@ -209,3 +209,21 @@ test("host can skip the reveal and the standings", async () => {
   eng.next();
   assert.equal(eng.state.phase, "final", "last question skips the standings");
 });
+
+test("player colours come from presence; anything that isn't #rrggbb is dropped", () => {
+  const { eng } = setup(1);
+  eng.syncMembers([
+    { id: "host", name: "h", color: "#ff5fa2" },
+    { id: "p1", name: "a", color: "#62b6ff" },
+    { id: "p2", name: "b", color: "red;background:url(x)" },
+  ]);
+  assert.equal(eng.state.players.host.color, "#ff5fa2");
+  assert.equal(eng.state.players.p1.color, "#62b6ff");
+  assert.equal(eng.state.players.p2.color, undefined);
+  eng.syncMembers([
+    { id: "host", name: "h", color: "#ff5fa2" },
+    { id: "p1", name: "a", color: "#3fe0b5" },
+    { id: "p2", name: "b" },
+  ]);
+  assert.equal(eng.state.players.p1.color, "#3fe0b5", "colour change is picked up");
+});

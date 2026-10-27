@@ -10,7 +10,7 @@ export const STANDINGS_MS = 4500;
 export const GRACE_MS = 2500; // network + audio start slack after the countdown
 export const MAX_PLAYERS = 20;
 
-export type Member = { id: string; name: string };
+export type Member = { id: string; name: string; color?: string };
 
 export type HostSnapshot = {
   state: GameState;
@@ -26,6 +26,7 @@ type Timers = {
 export type HostEngineOpts = {
   hostId: string;
   hostName: string;
+  hostColor?: string;
   onChange: (state: GameState) => void;
   fetchQuestions: (settings: GameSettings) => Promise<{ questions: HostQuestion[]; warnings: string[] }>;
   persist?: (snap: HostSnapshot) => void;
@@ -65,7 +66,7 @@ export class HostEngine {
         hostId: opts.hostId,
         phase: "lobby",
         settings: DEFAULT_SETTINGS,
-        players: { [opts.hostId]: newPlayer(opts.hostId, opts.hostName) },
+        players: { [opts.hostId]: newPlayer(opts.hostId, opts.hostName, opts.hostColor) },
         round: 0,
         totalRounds: 0,
         answered: [],
@@ -114,10 +115,10 @@ export class HostEngine {
       const p = players[m.id];
       if (!p) {
         if (Object.keys(players).length >= MAX_PLAYERS) continue;
-        players[m.id] = newPlayer(m.id, m.name);
+        players[m.id] = newPlayer(m.id, m.name, m.color);
         changed = true;
-      } else if (!p.online || p.name !== m.name) {
-        players[m.id] = { ...p, online: true, name: m.name.slice(0, 16) };
+      } else if (!p.online || p.name !== m.name || (m.color && p.color !== m.color)) {
+        players[m.id] = { ...p, online: true, name: m.name.slice(0, 16), color: safeColor(m.color) ?? p.color };
         changed = true;
       }
     }
@@ -262,8 +263,13 @@ export class HostEngine {
   }
 }
 
-function newPlayer(id: string, name: string): PlayerState {
-  return { id, name: name.slice(0, 16), score: 0, streak: 0, online: true };
+function newPlayer(id: string, name: string, color?: string): PlayerState {
+  return { id, name: name.slice(0, 16), color: safeColor(color), score: 0, streak: 0, online: true };
+}
+
+/** Only accept a plain #rrggbb colour from other players (it ends up in a style attribute). */
+function safeColor(c?: string) {
+  return c && /^#[0-9a-fA-F]{6}$/.test(c) ? c : undefined;
 }
 
 /** 1-based competition ranks by score (ties share a rank). */

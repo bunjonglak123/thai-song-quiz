@@ -3,7 +3,7 @@
 import { useState } from "react";
 import type { GameSettings, GameState } from "@/lib/types";
 import { ArtistPicker } from "./artist-picker";
-import { Banner, Button } from "./ui";
+import { Avatar, Banner, Button } from "./ui";
 
 export function Lobby({
   code,
@@ -47,7 +47,8 @@ export function Lobby({
           </h2>
           <ul className="mt-3 flex flex-wrap gap-2">
             {players.map((p) => (
-              <li key={p.id} className="rounded-full bg-stage px-3.5 py-1.5 lg:bg-stage-2">
+              <li key={p.id} className="flex items-center gap-2 rounded-full bg-stage py-1 pl-1 pr-3.5 lg:bg-stage-2">
+                <Avatar name={p.name} color={p.color} />
                 {p.name}
                 {p.id === state.hostId && <span className="ml-1.5 text-sm text-kho">หัวห้อง</span>}
                 {p.id === meId && p.id !== state.hostId && <span className="ml-1.5 text-sm text-muted">(คุณ)</span>}
