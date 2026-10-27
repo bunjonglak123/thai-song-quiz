@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { getThaiChart, lookupTracks, mapLimit, searchArtistDecoys, searchArtistSongs, toPoolTrack } from "../src/lib/apple.ts";
-import { searchYouTubePlaylists } from "../src/lib/youtube.ts";
+import { decodeEntities, searchYouTubePlaylists } from "../src/lib/youtube.ts";
 import { GET as previewGET } from "../src/app/api/preview/route.ts";
 
 const song = (id: number, name: string, extra: Record<string, unknown> = {}) => ({
@@ -128,4 +128,8 @@ test("searchYouTubePlaylists returns playlists with counts and hides tiny ones",
   const hits = await searchYouTubePlaylists("เพลงฮิต");
   assert.deepEqual(hits, [{ id: "PLaaaaaaaaaaaa", title: "เพลงฮิต 2010", channel: "A", thumbnail: "m.jpg", count: 50 }]);
   delete process.env.YOUTUBE_API_KEY;
+});
+
+test("decodeEntities fixes YouTube's escaped titles", () => {
+  assert.equal(decodeEntities("รวมเพลงฮิต ยุค 90 (Pop of 90&#39;s) &amp; more &quot;x&quot;"), 'รวมเพลงฮิต ยุค 90 (Pop of 90\'s) & more "x"');
 });

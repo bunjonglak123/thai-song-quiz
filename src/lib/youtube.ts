@@ -19,7 +19,8 @@ export function parseYouTubePlaylistId(input: string): string | null {
 export async function fetchYouTubePlaylist(playlistId: string, max = 200): Promise<{ title?: string; items: YouTubeItem[] }> {
   const key = process.env.YOUTUBE_API_KEY;
   if (!key) throw new Error("ยังไม่ได้ตั้งค่า YOUTUBE_API_KEY บนเซิร์ฟเวอร์ (ดูวิธีใน README)");
-  if (playlistId.startsWith("RD")) throw new Error("เพลย์ลิสต์แบบ Mix ของ YouTube ดึงรายการเพลงไม่ได้ ใช้เพลย์ลิสต์ที่สร้างเองหรือเพลย์ลิสต์สาธารณะแทน");
+  // Auto-generated Mixes (RD…) can't be read; YouTube Music's own playlists (RDCLAK…) can.
+  if (playlistId.startsWith("RD") && !playlistId.startsWith("RDCLAK")) throw new Error("เพลย์ลิสต์แบบ Mix ของ YouTube ดึงรายการเพลงไม่ได้ ใช้เพลย์ลิสต์ที่สร้างเองหรือเพลย์ลิสต์สาธารณะแทน");
 
   const items: YouTubeItem[] = [];
   let pageToken = "";
@@ -38,7 +39,7 @@ export async function fetchYouTubePlaylist(playlistId: string, max = 200): Promi
     for (const it of data.items ?? []) {
       const t = it.snippet?.title;
       if (!t || t === "Private video" || t === "Deleted video") continue;
-      items.push({ videoTitle: t, channel: it.snippet?.videoOwnerChannelTitle ?? "" });
+      items.push({ videoTitle: decodeEntities(t), channel: decodeEntities(it.snippet?.videoOwnerChannelTitle ?? "") });
     }
     if (!data.nextPageToken) break;
     pageToken = data.nextPageToken;
@@ -77,8 +78,8 @@ export async function searchYouTubePlaylists(q: string): Promise<YouTubePlaylist
     .filter((it) => it.id?.playlistId && it.snippet?.title)
     .map((it) => ({
       id: it.id!.playlistId!,
-      title: it.snippet!.title!,
-      channel: it.snippet?.channelTitle ?? "",
+      title: decodeEntities(it.snippet!.title!),
+      channel: decodeEntities(it.snippet?.channelTitle ?? "") || "YouTube Music",
       thumbnail: it.snippet?.thumbnails?.medium?.url ?? it.snippet?.thumbnails?.default?.url,
     }));
   if (hits.length) {
@@ -95,4 +96,16 @@ export async function searchYouTubePlaylists(q: string): Promise<YouTubePlaylist
     } catch {}
   }
   return hits.filter((h) => h.count == null || h.count >= 4);
+}
+
+/** The search endpoint returns HTML-escaped titles ("90&#39;s"). */
+export function decodeEntities(s: string): string {
+  return s
+    .replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(Number(n)))
+    .replace(/&#x([0-9a-f]+);/gi, (_, n) => String.fromCodePoint(parseInt(n, 16)))
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&amp;/g, "&");
 }
