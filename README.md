@@ -1,36 +1,77 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# ทายเพลงไทย
 
-## Getting Started
+เว็บเกมทายเพลงไทยแบบเล่นกับเพื่อน หัวห้องเปิดห้องแล้วส่งรหัสให้เพื่อน ทุกคนฟังท่อนเพลงพร้อมกันแล้วเลือกคำตอบจาก 4 ตัวเลือก (ก ข ค ง) ใครตอบถูกและเร็วกว่าได้คะแนนมากกว่า ตอบถูกติดกันได้โบนัส
 
-First, run the development server:
+- **เพลง:** ตัวอย่าง 30 วินาทีจาก Apple Music ผ่าน iTunes Search API (ไม่ต้องใช้ key) เลือกได้สองแบบ คือชาร์ต 100 เพลงที่คนไทยฟังเยอะสุดตอนนี้ หรือเลือกศิลปินเอง สูงสุด 8 คน
+- **เล่นกับเพื่อน:** Supabase Realtime (broadcast + presence) ไม่ต้องสร้างตารางฐานข้อมูล
+- **เทคโนโลยี:** Next.js 16 (App Router), React 19, Tailwind CSS 4, TypeScript
+
+## เริ่มใช้งาน
 
 ```bash
+npm install
+cp .env.example .env.local   # ใส่ค่า Supabase (ดูหัวข้อถัดไป)
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+เปิด http://localhost:3000
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+ถ้ายังไม่ได้ตั้ง Supabase เกมยังเล่นได้ในโหมดทดสอบ: เปิดหลายแท็บในเบราว์เซอร์เดียวกัน แต่ละแท็บนับเป็นผู้เล่นหนึ่งคน
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+### ตั้งค่า Supabase (ฟรี)
 
-## Learn More
+1. สมัครที่ supabase.com แล้วสร้างโปรเจกต์ใหม่ (เลือก region Singapore จะหน่วงน้อยสุดสำหรับคนไทย)
+2. ไปที่ Project Settings → API Keys คัดลอก **Publishable key** (โปรเจกต์เก่าจะเรียกว่า anon key) และคัดลอก **Project URL**
+3. ใส่ใน `.env.local`
+   ```
+   NEXT_PUBLIC_SUPABASE_URL=https://xxxx.supabase.co
+   NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=sb_publishable_...
+   ```
+   ถ้าใช้ anon key แบบเก่า ใส่ชื่อ `NEXT_PUBLIC_SUPABASE_ANON_KEY` แทนก็ได้
+4. รีสตาร์ท `npm run dev`
 
-To learn more about Next.js, take a look at the following resources:
+ไม่ต้องสร้างตารางหรือเขียน SQL เพราะเกมใช้แค่ช่องสัญญาณ realtime ถ้าต่อไม่ติด ให้ดูใน Realtime Settings ว่าไม่ได้เปิดโหมด "private channels only" ไว้
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+### Deploy ขึ้น Vercel
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+1. push โค้ดขึ้น GitHub
+2. ไปที่ vercel.com → Add New Project → เลือก repo
+3. ใส่ Environment Variables สองตัวของ Supabase เหมือนใน `.env.local`
+4. กด Deploy แล้วส่งลิงก์ให้เพื่อน
 
-## Deploy on Vercel
+## วิธีเล่น
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+1. หัวห้องกด "สร้างห้องใหม่" แล้วส่งลิงก์หรือรหัส 5 ตัวให้เพื่อน
+2. หัวห้องเลือกแหล่งเพลง จำนวนข้อ และเวลาต่อข้อ แล้วกด "เริ่มเกม"
+3. ทุกเครื่องจะเล่นท่อนเดียวกัน กดเลือกคำตอบ ระบบจะเฉลยเมื่อทุกคนตอบครบหรือหมดเวลา
+4. คะแนน = 500 ถ้าตอบถูก + สูงสุด 500 ตามความเร็ว + โบนัสตอบถูกติดกัน (+100 ต่อข้อ สูงสุด +300)
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+หัวห้องต้องเปิดหน้าเว็บค้างไว้ตลอดเกม เพราะเครื่องหัวห้องเป็นตัวเก็บเฉลยและนับคะแนน ถ้าหัวห้องรีเฟรช เกมจะกลับมาต่อจากข้อเดิมได้
+
+## โครงสร้างโค้ด
+
+| ไฟล์ | หน้าที่ |
+|---|---|
+| `src/lib/apple.ts` | ดึงชาร์ตไทยจาก Apple Music RSS และค้นเพลงด้วย iTunes API (storefront ไทย) |
+| `src/lib/music.ts` | กรองเวอร์ชัน Live/Acoustic/คาราโอเกะ ตัดเพลงซ้ำ สร้างคำถาม 4 ตัวเลือก คิดคะแนน |
+| `src/lib/host-engine.ts` | ลูปเกมของหัวห้อง: รับคำตอบ จับเวลา เฉลย ข้อต่อไป |
+| `src/lib/transport.ts` | ช่องสัญญาณ realtime: Supabase หรือ BroadcastChannel (โหมดทดสอบ) |
+| `src/lib/use-room.ts` | React hook เชื่อมหน้าเว็บกับห้อง |
+| `src/lib/audio.ts` | เล่นเสียง และปลดล็อกเสียงบนมือถือ (iOS ต้องแตะก่อนถึงเล่นเสียงได้) |
+| `src/app/api/questions` | API สร้างชุดคำถาม (เฉลยอยู่ที่หัวห้องเท่านั้น ไม่ส่งให้ผู้เล่น) |
+| `src/app/api/artists` | API แนะนำชื่อศิลปินตอนพิมพ์ค้นหา |
+
+## ทดสอบ
+
+```bash
+npm test                       # unit + integration tests (ไม่ต้องต่อเน็ต)
+MOCK_MUSIC=1 npm run dev       # เล่นด้วยเพลงปลอม ทดสอบระบบห้องโดยไม่เรียก Apple
+```
+
+## ข้อจำกัดที่ควรรู้
+
+- **iTunes Search API จำกัดจำนวนครั้ง** (ประมาณ 20 ครั้งต่อนาทีต่อ IP) โค้ดเก็บผลไว้ 1 ชั่วโมงเพื่อลดการเรียกซ้ำ ถ้าเลือก 8 ศิลปินพร้อมกันหลายห้องอาจโดนจำกัดชั่วคราว
+- **เพลงบางเพลงไม่มีตัวอย่างให้ฟัง** หรือไม่มีใน Apple Music ไทย ถ้าศิลปินไหนหาไม่เจอ ระบบจะแจ้งเตือนในห้องรอ
+- **ผู้เล่นโกงได้ถ้าตั้งใจ** เพราะเวลาตอบวัดจากเครื่องผู้เล่น และลิงก์ตัวอย่างเพลงเปิดดูได้ในเครื่อง เหมาะกับเล่นกับเพื่อน ไม่เหมาะกับการแข่งชิงรางวัล
+- **ถ้าหัวห้องปิดหน้าเว็บ เกมจะหยุด** (ยังไม่มีระบบย้ายหัวห้อง)
+- ตัวอย่างเพลงเป็นของ Apple ใช้ได้ตามเงื่อนไขการโปรโมตของ Apple หน้าเฉลยมีลิงก์ "ฟังเต็มเพลงบน Apple Music" ไว้ให้แล้ว

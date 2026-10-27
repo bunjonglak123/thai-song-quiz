@@ -1,0 +1,158 @@
+"use client";
+
+import Link from "next/link";
+import { useParams } from "next/navigation";
+import { useEffect, useState } from "react";
+import { FinalView } from "@/components/final";
+import { Lobby } from "@/components/lobby";
+import { QuestionView, RevealView } from "@/components/play";
+import { Banner, Button } from "@/components/ui";
+import { getVolume, setVolume, stopClip, unlockAudio } from "@/lib/audio";
+import { isHostOf, normalizeCode, playerId, saveName, savedName } from "@/lib/identity";
+import type { Member } from "@/lib/transport";
+import { useMounted } from "@/lib/use-mounted";
+import { useRoom } from "@/lib/use-room";
+
+export default function RoomClient() {
+  const params = useParams<{ code: string }>();
+  const code = normalizeCode(params.code ?? "");
+  // Everything here depends on browser storage, so render it on the client only.
+  if (!useMounted()) return <Shell />;
+  return <Room code={code} />;
+}
+
+function Room({ code }: { code: string }) {
+  const [me, setMe] = useState<Member | null>(null);
+  const [isHost] = useState(() => isHostOf(code));
+  const [name, setName] = useState(savedName);
+
+  // Every visit goes through this tap: it unlocks audio on phones.
+  function join(e: React.FormEvent) {
+    e.preventDefault();
+    const n = name.trim().slice(0, 16);
+    if (!n) return;
+    saveName(n);
+    unlockAudio();
+    setMe({ id: playerId(), name: n });
+  }
+
+  if (!me) {
+    return (
+      <Shell>
+        <form onSubmit={join} className="flex flex-col gap-4 pt-6">
+          <p className="text-muted">{isHost ? "ห้องของคุณ" : "กำลังเข้าห้อง"}</p>
+          <p className="font-display text-5xl tracking-[0.18em]">{code}</p>
+          <label htmlFor="jname" className="mt-6 text-[15px] text-muted">
+            ชื่อที่เพื่อนจะเห็น
+          </label>
+          <input
+            id="jname"
+            value={name}
+            maxLength={16}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="เช่น ภานุ"
+            autoComplete="nickname"
+            className="rounded-2xl border-2 border-stage-2 bg-stage px-4 py-3.5 text-lg placeholder:text-muted/60 focus:border-kho focus:outline-none"
+          />
+          <Button type="submit" disabled={!name.trim()}>
+            {isHost ? "เปิดห้อง" : "เข้าห้อง"}
+          </Button>
+          <p className="text-sm text-muted">เปิดเสียงเครื่องไว้ เกมจะเล่นเพลงทันทีที่เริ่มแต่ละข้อ</p>
+        </form>
+      </Shell>
+    );
+  }
+
+  return <Game code={code} me={me} isHost={isHost} />;
+}
+
+function Game({ code, me, isHost }: { code: string; me: Member; isHost: boolean }) {
+  const { state, status, transportKind, answer, host, hostOnline } = useRoom(code, me, isHost);
+  const [hostGone, setHostGone] = useState(false);
+
+  // Only complain about a missing host after a grace period (presence takes a moment).
+  useEffect(() => {
+    if (isHost || !state || hostOnline) return;
+    const t = setTimeout(() => setHostGone(true), 8000);
+    return () => {
+      clearTimeout(t);
+      setHostGone(false);
+    };
+  }, [isHost, state, hostOnline]);
+
+  useEffect(() => {
+    if (state?.phase === "final" || state?.phase === "lobby") stopClip();
+  }, [state?.phase]);
+  useEffect(() => () => stopClip(), []);
+
+  return (
+    <Shell volume>
+      <div className="space-y-4 pb-2">
+        {transportKind === "local" && (
+          <Banner tone="warn">
+            โหมดทดสอบในเครื่อง: เล่นได้เฉพาะแท็บในเบราว์เซอร์นี้ ตั้งค่า Supabase ในไฟล์ .env.local เพื่อเล่นกับเพื่อนข้ามเครื่อง
+          </Banner>
+        )}
+        {status === "error" && <Banner tone="error">เชื่อมต่อห้องไม่สำเร็จ ตรวจอินเทอร์เน็ตแล้วรีเฟรชหน้านี้</Banner>}
+        {status === "no-host" && !state && (
+          <Banner tone="error">
+            ไม่พบห้อง {code} ตรวจรหัสอีกครั้ง หรือรอให้หัวห้องเปิดหน้าเว็บค้างไว้{" "}
+            <Link href="/" className="underline underline-offset-4">
+              กลับหน้าแรก
+            </Link>
+          </Banner>
+        )}
+        {hostGone && <Banner tone="warn">หัวห้องหลุดการเชื่อมต่อ เกมจะเดินต่อเมื่อหัวห้องกลับมา</Banner>}
+      </div>
+
+      {!state ? (
+        status !== "no-host" && <p className="pt-10 text-center text-muted">กำลังเชื่อมต่อห้อง {code}…</p>
+      ) : state.phase === "lobby" || state.phase === "loading" ? (
+        <Lobby code={code} state={state} meId={me.id} isHost={isHost} onSettings={host.updateSettings} onStart={host.start} />
+      ) : state.phase === "question" && state.question ? (
+        <QuestionView key={state.question.id} state={state} meId={me.id} isHost={isHost} onAnswer={answer} onRevealNow={host.revealNow} />
+      ) : state.phase === "reveal" && state.reveal ? (
+        <RevealView state={state} meId={me.id} isHost={isHost} onNext={host.next} />
+      ) : state.phase === "final" ? (
+        <FinalView state={state} meId={me.id} isHost={isHost} onAgain={host.start} onLobby={host.backToLobby} />
+      ) : null}
+    </Shell>
+  );
+}
+
+function Shell({ children, volume = false }: { children?: React.ReactNode; volume?: boolean }) {
+  return (
+    <main className="mx-auto min-h-dvh max-w-md px-4 pb-10 pt-4">
+      <header className="mb-4 flex items-center justify-between gap-4">
+        <Link href="/" className="font-display text-lg text-muted hover:text-ink">
+          ทายเพลงไทย
+        </Link>
+        {volume && <Volume />}
+      </header>
+      {children}
+    </main>
+  );
+}
+
+function Volume() {
+  const [v, setV] = useState(getVolume);
+  return (
+    <label className="flex items-center gap-2 text-sm text-muted">
+      เสียง
+      <input
+        type="range"
+        min={0.05}
+        max={1}
+        step={0.05}
+        value={v}
+        onChange={(e) => {
+          const n = Number(e.target.value);
+          setV(n);
+          setVolume(n);
+        }}
+        className="w-24 accent-kho"
+        aria-label="ระดับเสียง"
+      />
+    </label>
+  );
+}

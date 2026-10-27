@@ -1,26 +1,84 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
+/* Game-show night palette: deep indigo stage, four answer-key colours. */
+@theme {
+  --color-night: #241b5e;
+  --color-stage: #2f2577;
+  --color-stage-2: #3a2f8c;
+  --color-ink: #f6f3ff;
+  --color-muted: #b9b2e6;
+  --color-deep: #1c1440;
+  --color-ko: #ff5fa2; /* ก */
+  --color-kho: #ffd447; /* ข */
+  --color-kho-khwai: #3fe0b5; /* ค */
+  --color-ngo: #62b6ff; /* ง */
+  --color-good: #3fe0b5;
+  --color-bad: #ff6b6b;
+
+  --font-display: "Mitr", "Anuphan", system-ui, sans-serif;
+  --font-sans: "Anuphan", system-ui, sans-serif;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+html,
+body {
+  background: var(--color-night);
+  color: var(--color-ink);
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-sans);
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Spotlight behind the stage, fixed so it doesn't scroll. */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background: radial-gradient(120% 60% at 50% -10%, #4b3cb0 0%, transparent 60%);
+  pointer-events: none;
+}
+
+:focus-visible {
+  outline: 3px solid var(--color-kho);
+  outline-offset: 3px;
+}
+
+/* Physical "key" press used by the answer buttons and primary buttons. */
+.key {
+  box-shadow: 0 6px 0 0 rgb(0 0 0 / 0.35);
+  transition: transform 80ms ease, box-shadow 80ms ease, opacity 150ms ease;
+}
+.key:active:not(:disabled) {
+  transform: translateY(4px);
+  box-shadow: 0 2px 0 0 rgb(0 0 0 / 0.35);
+}
+
+/* Equalizer bars while a clip plays. */
+@keyframes eq {
+  0%, 100% { transform: scaleY(0.25); }
+  50% { transform: scaleY(1); }
+}
+.eq span {
+  display: block;
+  width: 10px;
+  height: 56px;
+  border-radius: 5px;
+  transform-origin: bottom;
+  animation: eq 900ms ease-in-out infinite;
+}
+.eq.paused span {
+  animation-play-state: paused;
+  transform: scaleY(0.2);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .eq span {
+    animation: none;
+    transform: scaleY(0.6);
+  }
+  .key {
+    transition: none;
+  }
 }
