@@ -149,3 +149,92 @@ export function stopClip(bumpToken = true) {
     cur.src.stop(ctx.currentTime + 0.3);
   } catch {}
 }
+
+// ---------------------------------------------------------------------------
+// Sound effects, synthesised on the fly (no files to download). They go through the
+// same master gain as the music, so the volume slider controls both.
+
+const SFX_KEY = "tsq:sfx";
+const SFX_LEVEL = 0.9; // relative to the music, before the master volume
+
+export function getSfxEnabled() {
+  try {
+    return localStorage.getItem(SFX_KEY) !== "off";
+  } catch {
+    return true;
+  }
+}
+
+export function setSfxEnabled(on: boolean) {
+  try {
+    localStorage.setItem(SFX_KEY, on ? "on" : "off");
+  } catch {}
+}
+
+type Tone = {
+  freq: number;
+  to?: number; // pitch slide target
+  dur: number; // seconds
+  type?: OscillatorType;
+  gain?: number;
+  delay?: number; // seconds from now
+};
+
+function tones(list: Tone[]) {
+  if (!getSfxEnabled()) return;
+  let c: AudioContext;
+  try {
+    c = context();
+  } catch {
+    return;
+  }
+  // A tap resumes a suspended context; outside a tap this is harmless.
+  if (c.state !== "running") void c.resume().catch(() => {});
+  const t0 = c.currentTime + 0.005;
+  for (const t of list) {
+    const start = t0 + (t.delay ?? 0);
+    const osc = c.createOscillator();
+    const g = c.createGain();
+    osc.type = t.type ?? "sine";
+    osc.frequency.setValueAtTime(t.freq, start);
+    if (t.to) osc.frequency.exponentialRampToValueAtTime(t.to, start + t.dur);
+    const peak = (t.gain ?? 0.5) * SFX_LEVEL;
+    g.gain.setValueAtTime(0.0001, start);
+    g.gain.exponentialRampToValueAtTime(peak, start + 0.006);
+    g.gain.exponentialRampToValueAtTime(0.0001, start + t.dur);
+    osc.connect(g);
+    g.connect(master!);
+    osc.start(start);
+    osc.stop(start + t.dur + 0.02);
+  }
+}
+
+// Pitch for each answer key, so ก ข ค ง sound different (C5 E5 G5 C6).
+const PICK_NOTES = [523, 659, 784, 1047];
+
+export const sfx = {
+  /** Listening countdown: 3, 2, 1. */
+  tick: () => tones([{ freq: 880, dur: 0.07, type: "triangle", gain: 0.45 }]),
+  /** Last seconds of answer time: higher and sharper. */
+  tickUrgent: () => tones([{ freq: 1320, dur: 0.06, type: "square", gain: 0.18 }]),
+  /** Choices appear. */
+  go: () =>
+    tones([
+      { freq: 784, dur: 0.12, type: "triangle", gain: 0.45 },
+      { freq: 1175, dur: 0.22, type: "triangle", gain: 0.5, delay: 0.09 },
+    ]),
+  /** Time ran out. */
+  timeUp: () =>
+    tones([
+      { freq: 392, to: 196, dur: 0.35, type: "sawtooth", gain: 0.16 },
+      { freq: 392, to: 196, dur: 0.35, type: "triangle", gain: 0.3 },
+    ]),
+  /** Answer button: a short pop in that key's pitch. */
+  pick: (i: number) =>
+    tones([
+      { freq: PICK_NOTES[i] ?? 600, to: (PICK_NOTES[i] ?? 600) * 1.5, dur: 0.09, type: "sine", gain: 0.6 },
+      { freq: (PICK_NOTES[i] ?? 600) * 2, dur: 0.05, type: "triangle", gain: 0.15 },
+    ]),
+  /** Any other button. */
+  click: () => tones([{ freq: 1400, to: 900, dur: 0.045, type: "triangle", gain: 0.25 }]),
+};

@@ -1,6 +1,7 @@
 "use client";
 
 import type { ButtonHTMLAttributes, ReactNode } from "react";
+import { sfx } from "@/lib/audio";
 import { initialOf } from "@/lib/identity";
 
 type Tone = "primary" | "secondary" | "ghost";
@@ -9,6 +10,7 @@ export function Button({
   tone = "primary",
   className = "",
   children,
+  onClick,
   ...rest
 }: ButtonHTMLAttributes<HTMLButtonElement> & { tone?: Tone; children: ReactNode }) {
   const base = "rounded-2xl px-5 py-3.5 font-display text-lg disabled:opacity-40 disabled:cursor-not-allowed";
@@ -18,7 +20,14 @@ export function Button({
     ghost: "text-muted underline underline-offset-4 hover:text-ink",
   };
   return (
-    <button className={`${base} ${tones[tone]} ${className}`} {...rest}>
+    <button
+      className={`${base} ${tones[tone]} ${className}`}
+      onClick={(e) => {
+        sfx.click();
+        onClick?.(e);
+      }}
+      {...rest}
+    >
       {children}
     </button>
   );

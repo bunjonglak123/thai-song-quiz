@@ -227,3 +227,39 @@ test("player colours come from presence; anything that isn't #rrggbb is dropped"
   ]);
   assert.equal(eng.state.players.p1.color, "#3fe0b5", "colour change is picked up");
 });
+
+test("takeover: loading goes back to the lobby; a lost deck mid-game ends with the scores so far", async () => {
+  const mkState = (phase: GameState["phase"]) =>
+    ({
+      version: 7,
+      epoch: 1,
+      hostId: "old",
+      phase,
+      settings: { source: { kind: "chart", size: 100 }, rounds: 3, roundSeconds: 15, listenSeconds: 3 },
+      players: {
+        old: { id: "old", name: "o", score: 900, streak: 1, online: true },
+        me: { id: "me", name: "m", score: 400, streak: 0, online: true },
+      },
+      round: 1,
+      totalRounds: 3,
+      answered: [],
+    }) as GameState;
+  const opts = { hostId: "me", hostName: "m", onChange: () => {}, fetchQuestions: async () => ({ questions: [], warnings: [] }), timers: new FakeTimers() };
+
+  const a = new HostEngine(opts, { state: mkState("loading"), questions: [], picks: {} }, { takeover: true });
+  assert.equal(a.state.phase, "lobby");
+  assert.equal(a.state.epoch, 2);
+  assert.equal(a.state.hostId, "me");
+  assert.equal(a.state.players.old.online, false);
+  assert.ok(a.state.notice);
+
+  const b = new HostEngine(opts, { state: mkState("question"), questions: [], picks: {} }, { takeover: true });
+  assert.equal(b.state.phase, "final");
+  assert.equal(b.state.players.old.score, 900, "scores kept");
+
+  const t = new FakeTimers();
+  const c = new HostEngine({ ...opts, timers: t }, { state: mkState("reveal"), questions: [q(0), q(1), q(2)], picks: {} }, { takeover: true });
+  assert.equal(c.state.phase, "reveal");
+  t.advance(2500);
+  assert.equal(c.state.phase, "standings", "carries on from the reveal");
+});

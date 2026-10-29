@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { playClip } from "@/lib/audio";
+import { playClip, sfx } from "@/lib/audio";
 import type { GameState, PublicQuestion } from "@/lib/types";
 import { Avatar, Button, CHOICE_BG, CHOICE_MARKS, Equalizer } from "./ui";
 
@@ -67,8 +67,29 @@ export function QuestionView({
       .map(([id]) => ({ id, name: state.players[id]?.name ?? "?", color: state.players[id]?.color }));
   const answeredCount = state.answered.filter((id) => state.players[id]?.online).length;
 
+  // Countdown sounds: a tick for each listening second, a chime when the choices
+  // appear, faster ticks for the last 5 answer seconds, and a buzz when time's up.
+  const listenSec = startedAt != null && listening ? Math.ceil(listenLeft / 1000) : 0;
+  const answerSec = startedAt != null && !listening ? Math.ceil(answerLeft / 1000) : -1;
+  useEffect(() => {
+    if (listenSec > 0) sfx.tick();
+  }, [listenSec]);
+  useEffect(() => {
+    if (answerSec < 0) return;
+    if (answerSec === 0) {
+      if (answered == null) sfx.timeUp();
+    } else if (answerSec === Math.ceil(q.durationMs / 1000)) {
+      if (q.lockMs > 0) sfx.go();
+    } else if (answerSec <= 5 && answered == null) {
+      sfx.tickUrgent();
+    }
+    // Only fire when the displayed second changes, not when `answered` does.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [answerSec]);
+
   function pick(i: number) {
     if (answered != null || listening || timeUp) return;
+    sfx.pick(i);
     setAnswered(i);
     onAnswer(q.id, i, Math.round(elapsedSince(unlockAtRef.current)));
   }

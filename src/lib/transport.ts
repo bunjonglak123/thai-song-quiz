@@ -6,13 +6,18 @@
 import { createClient, type RealtimeChannel, type SupabaseClient } from "@supabase/supabase-js";
 
 export type Member = { id: string; name: string; color?: string };
-type Msg = { type: string; from: string; data: unknown };
+type Msg = { type: string; from: string; data: unknown; inbox?: boolean };
 type Handler = (data: unknown, from: string) => void;
 
 export interface RoomTransport {
   readonly kind: "supabase" | "local";
   connect(): Promise<void>;
   send(type: string, data: unknown): void; // goes to everyone else (not to self)
+  /** Goes only to whoever has the inbox open (the host). Keeps answers off everyone else's connection. */
+  sendToHost(type: string, data: unknown): void;
+  /** Start / stop receiving sendToHost messages. Called when this player becomes or stops being host. */
+  openInbox(): void;
+  closeInbox(): void;
   on(type: string, cb: Handler): () => void;
   onMembers(cb: (m: Member[]) => void): () => void;
   close(): void;
@@ -37,6 +42,16 @@ abstract class Base {
   protected handlers = new Map<string, Set<Handler>>();
   protected memberCbs = new Set<(m: Member[]) => void>();
   protected members: Member[] = [];
+  protected inboxOpen = false;
+  openInbox() {
+    this.inboxOpen = true;
+  }
+  closeInbox() {
+    this.inboxOpen = false;
+  }
+  protected emitInbox(msg: Msg) {
+    if (this.inboxOpen) this.emit(msg);
+  }
   on(type: string, cb: Handler) {
     if (!this.handlers.has(type)) this.handlers.set(type, new Set());
     this.handlers.get(type)!.add(cb);
@@ -105,6 +120,26 @@ class SupabaseTransport extends Base implements RoomTransport {
   private push(m: Msg) {
     void this.ch?.send({ type: "broadcast", event: "msg", payload: m });
   }
+  private inboxTopic() {
+    return `thai-song-quiz:${this.room}:inbox`;
+  }
+  private inboxSubscribed = false;
+  openInbox() {
+    super.openInbox();
+    if (this.inboxSubscribed) return;
+    this.inboxSubscribed = true;
+    const ch = supa().channel(this.inboxTopic(), { config: { broadcast: { self: false } } });
+    ch.on("broadcast", { event: "msg" }, ({ payload }) => this.emitInbox(payload as Msg));
+    ch.subscribe();
+  }
+  sendToHost(type: string, data: unknown) {
+    const m: Msg = { type, from: this.me.id, data, inbox: true };
+    // REST delivery: reaches only the inbox subscriber (the host), not every player.
+    supa()
+      .channel(this.inboxTopic(), { config: { broadcast: { self: false } } })
+      .httpSend("msg", m)
+      .catch(() => this.send(type, data)); // fall back to the room channel; the host listens there too
+  }
   send(type: string, data: unknown) {
     const m = { type, from: this.me.id, data };
     if (this.ready) this.push(m);
@@ -113,6 +148,12 @@ class SupabaseTransport extends Base implements RoomTransport {
   close() {
     if (this.ch) void supa().removeChannel(this.ch);
     this.ch = null;
+    const inbox = supa()
+      .getChannels()
+      .find((c) => c.topic === `realtime:${this.inboxTopic()}`);
+    if (inbox) void supa().removeChannel(inbox);
+    this.inboxSubscribed = false;
+    this.inboxOpen = false;
   }
 }
 
@@ -121,6 +162,7 @@ class LocalTransport extends Base implements RoomTransport {
   readonly kind = "local" as const;
   private bc: BroadcastChannel | null = null;
   private seen = new Map<string, { name: string; color?: string; at: number }>();
+  private beat: (() => void) | null = null;
   private timer: ReturnType<typeof setInterval> | null = null;
   private room: string;
   private me: Member;
@@ -135,18 +177,23 @@ class LocalTransport extends Base implements RoomTransport {
       const m = e.data as Msg;
       if (m.type === "__hb") {
         const d = m.data as { name?: string; color?: string };
+        const isNew = !this.seen.has(m.from);
         this.seen.set(m.from, { name: String(d?.name ?? "?"), color: d?.color, at: Date.now() });
         this.refresh();
+        if (isNew) this.beat?.(); // introduce ourselves right away, like a presence sync
+
       } else if (m.type === "__bye") {
         this.seen.delete(m.from);
         this.refresh();
-      } else this.emit(m);
+      } else if (m.inbox) this.emitInbox(m);
+      else this.emit(m);
     };
     const beat = () => {
       this.seen.set(this.me.id, { name: this.me.name, color: this.me.color, at: Date.now() });
       this.bc?.postMessage({ type: "__hb", from: this.me.id, data: { name: this.me.name, color: this.me.color } });
       this.refresh();
     };
+    this.beat = beat;
     beat();
     this.timer = setInterval(beat, 1500);
     if (typeof window !== "undefined") window.addEventListener("pagehide", this.bye);
@@ -159,6 +206,9 @@ class LocalTransport extends Base implements RoomTransport {
   }
   send(type: string, data: unknown) {
     this.bc?.postMessage({ type, from: this.me.id, data });
+  }
+  sendToHost(type: string, data: unknown) {
+    this.bc?.postMessage({ type, from: this.me.id, data, inbox: true });
   }
   close() {
     this.bye();

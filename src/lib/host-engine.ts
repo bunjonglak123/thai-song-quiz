@@ -8,7 +8,7 @@ import type { AnswerMsg, GameSettings, GameState, HostQuestion, PlayerState, Rev
 export const REVEAL_MS = 5000;
 export const STANDINGS_MS = 4500;
 export const GRACE_MS = 2500; // network + audio start slack after the countdown
-export const MAX_PLAYERS = 20;
+export const MAX_PLAYERS = 30;
 
 export type Member = { id: string; name: string; color?: string };
 
@@ -28,7 +28,7 @@ export type HostEngineOpts = {
   hostName: string;
   hostColor?: string;
   onChange: (state: GameState) => void;
-  fetchQuestions: (settings: GameSettings) => Promise<{ questions: HostQuestion[]; warnings: string[] }>;
+  fetchQuestions: (settings: GameSettings) => Promise<{ questions: HostQuestion[]; warnings: string[]; deckId?: string }>;
   persist?: (snap: HostSnapshot) => void;
   timers?: Timers;
 };
@@ -49,20 +49,35 @@ export class HostEngine {
   private startToken = 0;
   private opts: HostEngineOpts;
 
-  constructor(opts: HostEngineOpts, restore?: HostSnapshot | null) {
+  /**
+   * restore: this host's own saved snapshot (page refresh), or with takeover=true the last
+   * game state everyone saw plus the decrypted question deck, when the old host dropped out.
+   */
+  constructor(opts: HostEngineOpts, restore?: HostSnapshot | null, mode: { takeover?: boolean } = {}) {
     this.opts = opts;
     this.timers = opts.timers ?? {
       set: (fn, ms) => setTimeout(fn, ms),
       clear: (h) => clearTimeout(h as ReturnType<typeof setTimeout>),
     };
-    if (restore && restore.state.hostId === opts.hostId) {
-      this.state = restore.state;
+    if (restore && mode.takeover) {
+      const old = restore.state;
+      const players = { ...old.players };
+      if (players[old.hostId]) players[old.hostId] = { ...players[old.hostId], online: false };
+      if (!players[opts.hostId]) players[opts.hostId] = newPlayer(opts.hostId, opts.hostName, opts.hostColor);
+      else players[opts.hostId] = { ...players[opts.hostId], online: true };
+      this.state = { ...old, hostId: opts.hostId, epoch: (old.epoch ?? 1) + 1, players };
+      this.questions = restore.questions;
+      this.picks = {};
+      this.resumeTakeover();
+    } else if (restore && restore.state.hostId === opts.hostId) {
+      this.state = { ...restore.state, epoch: restore.state.epoch ?? 1 };
       this.questions = restore.questions;
       this.picks = restore.picks;
       this.resume();
     } else {
       this.state = {
         version: 1,
+        epoch: 1,
         hostId: opts.hostId,
         phase: "lobby",
         settings: DEFAULT_SETTINGS,
@@ -84,6 +99,25 @@ export class HostEngine {
       this.arm(() => this.reveal(), (q?.lockMs ?? 0) + (q?.durationMs ?? 15000) + GRACE_MS);
     } else if (p === "reveal" || p === "standings") {
       this.arm(() => this.next(), 2500);
+    }
+  }
+
+  /** Pick the game up where the old host left it. Answers in flight for the current question are lost, so it is asked again. */
+  private resumeTakeover() {
+    const p = this.state.phase;
+    const midGame = p === "question" || p === "reveal" || p === "standings";
+    if (p === "loading") {
+      this.commit({ phase: "lobby", notice: "หัวห้องเดิมหลุดตอนกำลังโหลดเพลง กดเริ่มเกมใหม่ได้เลย" });
+    } else if (midGame && this.questions.length < this.state.totalRounds) {
+      // Couldn't recover the songs: finish with the scores so far.
+      this.commit({ phase: "final", question: undefined, notice: "หัวห้องเดิมหลุดและโหลดเพลงที่เหลือไม่ได้ จบเกมด้วยคะแนนตอนนี้" });
+    } else if (p === "question") {
+      this.ask(this.state.round);
+    } else if (p === "reveal" || p === "standings") {
+      this.commit({});
+      this.arm(() => this.next(), 2500);
+    } else {
+      this.commit({});
     }
   }
 
@@ -149,12 +183,12 @@ export class HostEngine {
     const players = resetScores(this.state.players, this.state.phase === "final");
     this.commit({ phase: "loading", players, error: undefined, notice: undefined, reveal: undefined, question: undefined });
     try {
-      const { questions, warnings } = await this.opts.fetchQuestions(this.state.settings);
+      const { questions, warnings, deckId } = await this.opts.fetchQuestions(this.state.settings);
       if (token !== this.startToken) return;
       if (!questions.length) throw new Error("ไม่มีคำถาม");
       this.questions = questions;
       this.picks = {};
-      this.commit({ totalRounds: questions.length, notice: warnings.length ? warnings.join(" · ") : undefined });
+      this.commit({ totalRounds: questions.length, deckId, notice: warnings.length ? warnings.join(" · ") : undefined });
       this.ask(0);
     } catch (e) {
       if (token !== this.startToken) return;
@@ -166,7 +200,10 @@ export class HostEngine {
     const q = this.questions[i];
     const durationMs = this.state.settings.roundSeconds * 1000;
     const lockMs = (this.state.settings.listenSeconds ?? 3) * 1000;
-    this.picks[q.id] = {};
+    // A question asked again after a host takeover gets a fresh id, so every player's
+    // screen restarts it and stale answers to the first attempt are ignored.
+    const qid = this.state.epoch > 1 ? `${q.id}~${this.state.epoch}` : q.id;
+    this.picks[qid] = {};
     this.commit({
       phase: "question",
       round: i,
@@ -174,7 +211,7 @@ export class HostEngine {
       livePicks: {},
       reveal: undefined,
       question: {
-        id: q.id,
+        id: qid,
         index: i,
         previewUrl: q.track.previewUrl,
         startAt: q.startAt,
@@ -216,7 +253,7 @@ export class HostEngine {
     if (s.phase !== "question" || !s.question) return;
     this.disarm();
     const q = this.questions[s.round];
-    const picks = this.picks[q.id] ?? {};
+    const picks = this.picks[s.question.id] ?? {};
     const players: Record<string, PlayerState> = {};
     const outPicks: Reveal["picks"] = {};
     const before = rankOf(s.players);
@@ -232,7 +269,7 @@ export class HostEngine {
       phase: "reveal",
       livePicks: undefined,
       players,
-      reveal: { questionId: q.id, answer: q.answer, track: q.track, choices: q.choices, picks: outPicks },
+      reveal: { questionId: s.question.id, answer: q.answer, track: q.track, choices: q.choices, picks: outPicks },
     });
     this.arm(() => this.next(), REVEAL_MS);
   }

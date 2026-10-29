@@ -7,7 +7,7 @@ import { FinalView } from "@/components/final";
 import { Lobby } from "@/components/lobby";
 import { QuestionView, RevealView, StandingsView } from "@/components/play";
 import { Avatar, Banner, Button, ColorPicker } from "@/components/ui";
-import { getVolume, setVolume, stopClip, unlockAudio } from "@/lib/audio";
+import { getSfxEnabled, getVolume, setSfxEnabled, setVolume, sfx, stopClip, unlockAudio } from "@/lib/audio";
 import { isHostOf, normalizeCode, PLAYER_COLORS, playerId, saveColor, savedColor, saveName, savedName } from "@/lib/identity";
 import type { Member } from "@/lib/transport";
 import { useMounted } from "@/lib/use-mounted";
@@ -77,19 +77,30 @@ function Room({ code }: { code: string }) {
   return <Game code={code} me={me} isHost={isHost} />;
 }
 
-function Game({ code, me, isHost }: { code: string; me: Member; isHost: boolean }) {
-  const { state, status, transportKind, answer, host, hostOnline } = useRoom(code, me, isHost);
-  const [hostGone, setHostGone] = useState(false);
+function Game({ code, me, isHost: isCreator }: { code: string; me: Member; isHost: boolean }) {
+  const { state, status, transportKind, answer, host, hostOnline, amHost, hostChange } = useRoom(code, me, isCreator);
+  // Host controls follow the role, which can move to another player mid-game.
+  const isHost = amHost;
+  const [hostMissing, setHostMissing] = useState(false);
+  const [dismissedAt, setDismissedAt] = useState(0);
 
-  // Only complain about a missing host after a grace period (presence takes a moment).
+  // Presence blips are common; only say the host is gone after a moment.
   useEffect(() => {
     if (isHost || !state || hostOnline) return;
-    const t = setTimeout(() => setHostGone(true), 8000);
+    const t = setTimeout(() => setHostMissing(true), 2000);
     return () => {
       clearTimeout(t);
-      setHostGone(false);
+      setHostMissing(false);
     };
   }, [isHost, state, hostOnline]);
+
+  // The "host changed" note shows for a few seconds after each change.
+  useEffect(() => {
+    if (!hostChange) return;
+    const t = setTimeout(() => setDismissedAt(hostChange.at), 6000);
+    return () => clearTimeout(t);
+  }, [hostChange]);
+  const showChange = !!hostChange && dismissedAt !== hostChange.at;
 
   useEffect(() => {
     if (state?.phase === "final" || state?.phase === "lobby") stopClip();
@@ -113,7 +124,13 @@ function Game({ code, me, isHost }: { code: string; me: Member; isHost: boolean 
             </Link>
           </Banner>
         )}
-        {hostGone && <Banner tone="warn">หัวห้องหลุดการเชื่อมต่อ เกมจะเดินต่อเมื่อหัวห้องกลับมา</Banner>}
+        {hostMissing && <Banner tone="warn">หัวห้องหลุดการเชื่อมต่อ ถ้าไม่กลับมาในไม่กี่วินาที ระบบจะส่งต่อหัวห้องให้คนถัดไป</Banner>}
+        {showChange && hostChange && !hostMissing && (
+          <Banner tone="info">
+            {hostChange.me ? "หัวห้องเดิมหลุด ตอนนี้คุณเป็นหัวห้องแทน เกมเดินต่อจากเดิม" : `หัวห้องเดิมหลุด ตอนนี้ ${hostChange.name} เป็นหัวห้องแทน`}
+          </Banner>
+        )}
+        {state?.phase === "final" && state.notice && <Banner tone="warn">{state.notice}</Banner>}
       </div>
 
       {!state ? (
@@ -136,7 +153,7 @@ function Game({ code, me, isHost }: { code: string; me: Member; isHost: boolean 
 function Shell({ children, volume = false }: { children?: React.ReactNode; volume?: boolean }) {
   return (
     <main className="mx-auto min-h-dvh w-full max-w-7xl px-4 pb-10 pt-4 sm:px-6 lg:px-10 lg:pt-6">
-      <header className="mb-4 flex items-center justify-between gap-4 lg:mb-8">
+      <header className="mb-4 flex flex-wrap items-center justify-between gap-x-4 gap-y-2 lg:mb-8">
         <Link href="/" className="font-display text-lg text-muted hover:text-ink">
           ทายเพลงไทย
         </Link>
@@ -149,23 +166,40 @@ function Shell({ children, volume = false }: { children?: React.ReactNode; volum
 
 function Volume() {
   const [v, setV] = useState(getVolume);
+  const [fx, setFx] = useState(getSfxEnabled);
   return (
-    <label className="flex items-center gap-2 text-sm text-muted">
-      เสียง
-      <input
-        type="range"
-        min={0}
-        max={1}
-        step={0.05}
-        value={v}
-        onChange={(e) => {
-          const n = Number(e.target.value);
-          setV(n);
-          setVolume(n);
+    <div className="flex items-center gap-3">
+      <button
+        type="button"
+        aria-pressed={fx}
+        onClick={() => {
+          setSfxEnabled(!fx);
+          setFx(!fx);
+          if (!fx) sfx.click();
         }}
-        className="w-24 accent-kho lg:w-36"
-        aria-label="ระดับเสียง"
-      />
-    </label>
+        className={`rounded-full border px-2.5 py-1 text-sm ${fx ? "border-kho text-ink" : "border-stage-2 text-muted line-through"}`}
+        title="เสียงนับถอยหลังและเสียงกดปุ่ม"
+      >
+        เอฟเฟกต์
+      </button>
+      <label className="flex items-center gap-2 text-sm text-muted">
+        <span className="hidden sm:inline">เสียง</span>
+        <input
+          type="range"
+          min={0}
+          max={1}
+          step={0.05}
+          value={v}
+          onChange={(e) => {
+            const n = Number(e.target.value);
+            setV(n);
+            setVolume(n);
+          }}
+          onPointerUp={() => sfx.tick()}
+          className="w-20 accent-kho sm:w-24 lg:w-36"
+          aria-label="ระดับเสียง"
+        />
+      </label>
+    </div>
   );
 }

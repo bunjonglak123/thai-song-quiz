@@ -75,7 +75,11 @@ export type Phase = "lobby" | "loading" | "question" | "reveal" | "standings" | 
 /** The full game state the host broadcasts. Contains no future answers. */
 export type GameState = {
   version: number;
+  /** Goes up by one each time the host role moves to another player. Higher epoch wins. */
+  epoch: number;
   hostId: string;
+  /** Id of the encrypted question deck for the current game (players keep it for a takeover). */
+  deckId?: string;
   phase: Phase;
   settings: GameSettings;
   players: Record<string, PlayerState>;

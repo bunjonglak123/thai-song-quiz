@@ -1,14 +1,14 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { HostEngine, type HostSnapshot } from "./host-engine";
+import { Room, type FetchedQuestions, type RoomView } from "./room";
 import { getPlaylistTracks } from "./spotify";
-import { createTransport, hasSupabase, type Member, type RoomTransport } from "./transport";
-import type { GameSettings, GameState, HostQuestion } from "./types";
+import { createTransport, hasSupabase, type Member } from "./transport";
+import type { GameSettings, HostQuestion } from "./types";
 
-export type ConnStatus = "connecting" | "ok" | "error" | "no-host";
+export type { ConnStatus } from "./room";
 
-async function fetchQuestions(settings: GameSettings) {
+async function fetchQuestions(settings: GameSettings): Promise<FetchedQuestions> {
   // Spotify only lets the logged-in host read their playlist, so the host's browser
   // fetches the song list and sends it along.
   const tracks = settings.source.kind === "spotify" ? await getPlaylistTracks(settings.source.playlistId) : undefined;
@@ -17,140 +17,86 @@ async function fetchQuestions(settings: GameSettings) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ ...settings, tracks }),
   });
-  const data = (await res.json().catch(() => ({}))) as {
-    questions?: HostQuestion[];
-    warnings?: string[];
-    error?: string;
-  };
+  const data = (await res.json().catch(() => ({}))) as Partial<FetchedQuestions> & { error?: string };
   if (!res.ok || !data.questions) throw new Error(data.error || `โหลดเพลงไม่สำเร็จ (${res.status})`);
-  return { questions: data.questions, warnings: data.warnings ?? [] };
+  return { questions: data.questions, warnings: data.warnings ?? [], deck: data.deck, deckId: data.deckId };
 }
 
-function readSnap(key: string): HostSnapshot | null {
-  try {
-    const raw = sessionStorage.getItem(key);
-    return raw ? (JSON.parse(raw) as HostSnapshot) : null;
-  } catch {
-    return null;
-  }
+async function openDeck(deck: string): Promise<HostQuestion[]> {
+  const res = await fetch("/api/deck", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ deck }),
+  });
+  const data = (await res.json().catch(() => ({}))) as { questions?: HostQuestion[] };
+  if (!res.ok || !data.questions) throw new Error("open deck failed");
+  return data.questions;
 }
 
-export function useRoom(code: string, me: Member | null, isHost: boolean) {
-  const [state, setState] = useState<GameState | null>(null);
-  const [members, setMembers] = useState<Member[]>([]);
-  const [status, setStatus] = useState<ConnStatus>("connecting");
-  const engineRef = useRef<HostEngine | null>(null);
-  const tRef = useRef<RoomTransport | null>(null);
+const sessionKV = {
+  get: (k: string) => {
+    try {
+      return sessionStorage.getItem(k);
+    } catch {
+      return null;
+    }
+  },
+  set: (k: string, v: string) => {
+    try {
+      sessionStorage.setItem(k, v);
+    } catch {}
+  },
+  remove: (k: string) => {
+    try {
+      sessionStorage.removeItem(k);
+    } catch {}
+  },
+};
+
+const EMPTY: RoomView = { state: null, members: [], status: "connecting", amHost: false, hostChange: null };
+
+export function useRoom(code: string, me: Member | null, isCreator: boolean) {
+  const [view, setView] = useState<RoomView>(EMPTY);
+  const roomRef = useRef<Room | null>(null);
   const meId = me?.id;
   const meName = me?.name;
   const meColor = me?.color;
 
   useEffect(() => {
     if (!meId || !meName) return;
-    const t = createTransport(code, { id: meId, name: meName, color: meColor });
-    tRef.current = t;
-    let engine: HostEngine | null = null;
-    let gotState = false;
-    let helloTimer: ReturnType<typeof setInterval> | null = null;
-    let noHostTimer: ReturnType<typeof setTimeout> | null = null;
-    const offs: (() => void)[] = [];
-
-    if (isHost) {
-      const key = `tsq:snap:${code}`;
-      engine = new HostEngine(
-        {
-          hostId: meId,
-          hostName: meName,
-          hostColor: meColor,
-          onChange: (s) => {
-            setState(s);
-            t.send("state", s);
-          },
-          persist: (snap) => {
-            try {
-              sessionStorage.setItem(key, JSON.stringify(snap));
-            } catch {}
-          },
-          fetchQuestions,
-        },
-        readSnap(key),
-      );
-      engineRef.current = engine;
-      offs.push(t.on("hello", () => t.send("state", engine!.state)));
-      offs.push(
-        t.on("answer", (d, from) => {
-          const a = d as { questionId: string; choice: number; ms: number };
-          engine!.answer({ playerId: from, questionId: a.questionId, choice: a.choice, ms: a.ms });
-        }),
-      );
-    } else {
-      offs.push(
-        t.on("state", (d) => {
-          gotState = true;
-          setStatus("ok");
-          setState(d as GameState);
-        }),
-      );
-    }
-
-    offs.push(
-      t.onMembers((m) => {
-        setMembers(m);
-        engine?.syncMembers(m);
-      }),
-    );
-
-    t.connect()
-      .then(() => {
-        if (isHost) {
-          setStatus("ok");
-          setState(engine!.state);
-          t.send("state", engine!.state);
-        } else {
-          // Ask the host for the current state until it answers.
-          t.send("hello", null);
-          helloTimer = setInterval(() => {
-            if (gotState) {
-              if (helloTimer) clearInterval(helloTimer);
-            } else t.send("hello", null);
-          }, 2000);
-          noHostTimer = setTimeout(() => {
-            if (!gotState) setStatus("no-host");
-          }, 8000);
-        }
-      })
-      .catch(() => setStatus("error"));
-
+    const member = { id: meId, name: meName, color: meColor };
+    const room = new Room({
+      code,
+      me: member,
+      isCreator,
+      transport: createTransport(code, member),
+      fetchQuestions,
+      openDeck,
+      storage: sessionKV,
+    });
+    roomRef.current = room;
+    const off = room.subscribe(setView);
+    void room.start();
     return () => {
-      offs.forEach((f) => f());
-      if (helloTimer) clearInterval(helloTimer);
-      if (noHostTimer) clearTimeout(noHostTimer);
-      engine?.dispose();
-      engineRef.current = null;
-      t.close();
-      tRef.current = null;
+      off();
+      room.dispose();
+      roomRef.current = null;
+      setView(EMPTY);
     };
-  }, [code, meId, meName, meColor, isHost]);
+  }, [code, meId, meName, meColor, isCreator]);
 
-  const answer = useCallback(
-    (questionId: string, choice: number, ms: number) => {
-      if (!meId) return;
-      if (engineRef.current) engineRef.current.answer({ playerId: meId, questionId, choice, ms });
-      else tRef.current?.send("answer", { questionId, choice, ms });
-    },
-    [meId],
-  );
+  const answer = useCallback((questionId: string, choice: number, ms: number) => roomRef.current?.answer(questionId, choice, ms), []);
 
   const host = {
-    updateSettings: (s: GameSettings) => engineRef.current?.updateSettings(s),
-    start: () => void engineRef.current?.start(),
-    next: () => engineRef.current?.next(),
-    revealNow: () => engineRef.current?.reveal(),
-    backToLobby: () => engineRef.current?.backToLobby(),
+    updateSettings: (s: GameSettings) => roomRef.current?.host.updateSettings(s),
+    start: () => roomRef.current?.host.start(),
+    next: () => roomRef.current?.host.next(),
+    revealNow: () => roomRef.current?.host.revealNow(),
+    backToLobby: () => roomRef.current?.host.backToLobby(),
   };
 
-  const hostOnline = !!state && members.some((m) => m.id === state.hostId);
-
+  const { state, members, status, amHost, hostChange } = view;
+  const hostOnline = !!state && (amHost || members.some((m) => m.id === state.hostId));
   const transportKind: "supabase" | "local" = hasSupabase ? "supabase" : "local";
-  return { state, members, status, transportKind, answer, host, hostOnline };
+  return { state, members, status, transportKind, answer, host, hostOnline, amHost, hostChange };
 }
