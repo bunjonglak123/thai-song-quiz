@@ -1,124 +1,156 @@
-# ทายเพลงไทย
+# Thai Song Quiz (ทายเพลงไทย): a real-time multiplayer music quiz
 
-เว็บเกมทายเพลงไทยแบบเล่นกับเพื่อน หัวห้องเปิดห้องแล้วส่งรหัสให้เพื่อน ทุกคนฟังท่อนเพลงพร้อมกันแล้วเลือกคำตอบจาก 4 ตัวเลือก (ก ข ค ง) ใครตอบถูกและเร็วกว่าได้คะแนนมากกว่า ตอบถูกติดกันได้โบนัส
+[![CI](https://github.com/bunjonglak123/thai-song-quiz/actions/workflows/ci.yml/badge.svg)](https://github.com/bunjonglak123/thai-song-quiz/actions/workflows/ci.yml)
 
-- **เพลง:** ตัวอย่าง 30 วินาทีจาก Apple Music ผ่าน iTunes Search API (ไม่ต้องใช้ key) เลือกได้สองแบบ คือชาร์ต 100 เพลงที่คนไทยฟังเยอะสุดตอนนี้ หรือเลือกศิลปินเอง สูงสุด 8 คน
-- **เล่นกับเพื่อน:** Supabase Realtime (broadcast + presence) ไม่ต้องสร้างตารางฐานข้อมูล
-- **เทคโนโลยี:** Next.js 16 (App Router), React 19, Tailwind CSS 4, TypeScript
+This is a party game I built to play with friends. One person opens a room and shares a
+5-letter code. Everyone hears the same 30-second clip of a Thai song at the same moment,
+then picks the title from four choices (ก ข ค ง). A faster correct answer scores more
+points, and answering correctly several times in a row earns a streak bonus.
 
-## เริ่มใช้งาน
+**Live:** https://thai-song-quiz-fawn.vercel.app
+
+To try it alone, open the room link in a second browser tab and that tab joins as another player.
+
+| Home | Lobby | Question |
+|---|---|---|
+| ![Home](docs/screenshots/home.png) | ![Lobby](docs/screenshots/lobby.png) | ![Question](docs/screenshots/question.png) |
+
+| Reveal | Final | Mobile |
+|---|---|---|
+| ![Reveal](docs/screenshots/reveal.png) | ![Final](docs/screenshots/final.png) | ![Mobile](docs/screenshots/mobile.png) |
+
+*Screenshots are taken from mock mode, so all names and song titles in them are made up.*
+
+## Features
+
+- **Real-time rooms, no accounts.** Players join with a room code or a link. A room holds up to 30 players.
+- **Many song sources.** Choose from:
+  - Apple Music's Thai Top 100 chart
+  - curated sets, such as 2000s rock, 90s pop and heartbreak songs
+  - up to 8 artists you pick
+  - your own playlist, built by searching Apple Music
+  - a Spotify playlist (PKCE login, no client secret needed)
+  - a YouTube playlist
+- **Hard choices.** Wrong answers are other songs by the same artist when possible, so knowing the singer is not enough. Live, acoustic and karaoke versions and duplicates are filtered out.
+- **Synced play.** An optional "listen first" delay (0, 3 or 5 seconds) hides the choices while the clip plays. The answer timer starts when the choices appear, and the round is revealed once everyone has answered or time is up.
+- **Host failover.** If the host disconnects for more than 6 seconds, the next player becomes host automatically. The game continues with the same songs and scores.
+- **Mobile audio that works.** Sound plays through the Web Audio API with a perceptual volume curve, and audio is unlocked on iOS.
+
+## How it works
+
+```mermaid
+flowchart LR
+  subgraph Browsers
+    H[Host tab<br/>host-engine: timer, answers, scoring]
+    P1[Player tab]
+    P2[Player tab]
+  end
+  H <-->|broadcast + presence| RT[(Supabase Realtime<br/>or BroadcastChannel in test mode)]
+  P1 <--> RT
+  P2 <--> RT
+  H -->|POST /api/questions| API[Next.js route handlers]
+  API --> AM[Apple Music RSS + iTunes Search]
+  API -.-> SP[Spotify / YouTube APIs]
+  P1 -->|GET /api/preview| API
+```
+
+- **No database.** All game state lives in the host's browser and is broadcast over a realtime channel. With Supabase, the channel uses broadcast and presence. Without Supabase, the game falls back to `BroadcastChannel`, so several tabs in one browser can play together. Tests, Docker and the e2e run all use this fallback.
+- **The host is the referee.** `src/lib/host-engine.ts` runs the game loop: it starts each round, collects answers, keeps the clock, reveals the answer and computes scores. Players only receive what they need to see. The answer key is never sent to players.
+- **Failover without leaking answers.** The question deck is encrypted with AES-GCM on the server (`src/lib/deck.ts`) and every player holds the encrypted copy. When a new host takes over, it sends that copy to `/api/deck`, the only place it can be decrypted, so the game continues from the same question.
+- **Scoring.** A correct answer is worth 500 points, plus up to 500 more for speed, plus a streak bonus of +100 per round in a row (up to +300).
+- **Server routes** (`src/app/api/*`):
+  - `questions` builds the question set.
+  - `preview` proxies Apple preview audio (Apple domains only) so Web Audio can decode it.
+  - `artists` suggests artist names while you type.
+  - `songs`, `youtube` and `deck` cover the remaining sources and failover.
+
+| File | Role |
+|---|---|
+| `src/lib/music.ts` | Version filtering, de-duplication, building questions, scoring |
+| `src/lib/host-engine.ts` | Host game loop (unit-tested with an injected clock) |
+| `src/lib/room.ts` | Room controller: joining, host election, batching realtime messages |
+| `src/lib/transport.ts` | Realtime transport: Supabase or BroadcastChannel |
+| `src/lib/apple.ts` | Thai chart and iTunes search (TH storefront) |
+| `src/lib/playlist.ts` | Matching Spotify/YouTube tracks to Apple previews |
+| `src/lib/deck.ts` | AES-GCM encrypted deck for host failover |
+| `src/lib/audio.ts` | Web Audio playback, volume and iOS unlock |
+
+**Stack:** Next.js 16 (App Router), React 19, TypeScript, Tailwind CSS 4, Supabase Realtime.
+
+## Run it locally
+
+You need Node 22.6 or newer:
 
 ```bash
 npm install
-cp .env.example .env.local   # ใส่ค่า Supabase (ดูหัวข้อถัดไป)
-npm run dev
+npm run dev               # http://localhost:3000
 ```
 
-เปิด http://localhost:3000
+No keys are needed. Without Supabase the game runs in multi-tab mode: open the room in a
+few tabs and each tab is a player. Songs still come from Apple Music previews. For a
+fully offline run with made-up songs and generated tones, start it with `MOCK_MUSIC=1 npm run dev`.
 
-ถ้ายังไม่ได้ตั้ง Supabase เกมยังเล่นได้ในโหมดทดสอบ: เปิดหลายแท็บในเบราว์เซอร์เดียวกัน แต่ละแท็บนับเป็นผู้เล่นหนึ่งคน
-
-### ตั้งค่า Supabase (ฟรี)
-
-1. สมัครที่ supabase.com แล้วสร้างโปรเจกต์ใหม่ (เลือก region Singapore จะหน่วงน้อยสุดสำหรับคนไทย)
-2. ไปที่ Project Settings → API Keys คัดลอก **Publishable key** (โปรเจกต์เก่าจะเรียกว่า anon key) และคัดลอก **Project URL**
-3. ใส่ใน `.env.local`
-   ```
-   NEXT_PUBLIC_SUPABASE_URL=https://xxxx.supabase.co
-   NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=sb_publishable_...
-   ```
-   ถ้าใช้ anon key แบบเก่า ใส่ชื่อ `NEXT_PUBLIC_SUPABASE_ANON_KEY` แทนก็ได้
-4. รีสตาร์ท `npm run dev`
-
-ไม่ต้องสร้างตารางหรือเขียน SQL เพราะเกมใช้แค่ช่องสัญญาณ realtime ถ้าต่อไม่ติด ให้ดูใน Realtime Settings ว่าไม่ได้เปิดโหมด "private channels only" ไว้
-
-### เปิดโหมด Spotify playlist (ไม่บังคับ)
-
-ตั้งแต่กุมภาพันธ์ 2026 Spotify ให้แอปทดลอง (Development Mode) อ่านได้เฉพาะเพลย์ลิสต์ที่ผู้ล็อกอินเป็นเจ้าของหรือร่วมแก้ไข เจ้าของแอปต้องใช้ Spotify Premium และล็อกอินได้สูงสุด 5 บัญชี ในเกมนี้มีแค่หัวห้องที่ล็อกอิน เพื่อนไม่ต้องล็อกอิน
-
-1. เข้า developer.spotify.com → Dashboard → Create app เลือก Web API
-2. ช่อง Redirect URIs ใส่ทั้งสองอัน (Spotify ไม่รับ `localhost` ต้องใช้ `127.0.0.1`)
-   ```
-   https://<โดเมนบน Vercel>/spotify-callback
-   http://127.0.0.1:3000/spotify-callback
-   ```
-3. คัดลอก Client ID ใส่ใน `.env.local` และ Environment Variables บน Vercel (ไม่ต้องใช้ Client Secret)
-   ```
-   NEXT_PUBLIC_SPOTIFY_CLIENT_ID=...
-   ```
-4. ถ้าหัวห้องไม่ใช่เจ้าของแอป ให้เพิ่มอีเมล Spotify ของคนนั้นใน User Management ของแอป
-5. ตอนทดสอบในเครื่อง เปิดเว็บที่ `http://127.0.0.1:3000` ไม่ใช่ `localhost:3000`
-
-ถ้าอยากใช้เพลย์ลิสต์ของคนอื่นหรือของ Spotify เอง ให้เพิ่มเพลงทั้งหมดเข้าเพลย์ลิสต์ใหม่ของตัวเองก่อน
-
-### เพลย์ลิสต์ของฉัน (ไม่ต้องตั้งค่าอะไร)
-
-หัวห้องค้นหาเพลงจาก Apple Music ไทย กดฟังตัวอย่าง แล้วกด + เพื่อเพิ่มเข้าเพลย์ลิสต์ ระบบเก็บรหัสเพลงไว้ ตอนเล่นจึงได้ตัวอย่างเสียงครบทุกเพลง ไม่ต้องจับคู่ชื่อเหมือนโหมด Spotify/YouTube เพลย์ลิสต์เก็บไว้ในเบราว์เซอร์ของเครื่องที่สร้าง
-
-### เปิดโหมด YouTube playlist (ไม่บังคับ)
-
-1. เข้า console.cloud.google.com → สร้างโปรเจกต์ → APIs & Services → Library → เปิด YouTube Data API v3
-2. Credentials → Create credentials → API key แนะนำให้จำกัด key ให้ใช้ได้เฉพาะ YouTube Data API v3
-3. ใส่ใน `.env.local` และบน Vercel (ไม่ต้องขึ้นต้นด้วย `NEXT_PUBLIC_` เพราะใช้ฝั่งเซิร์ฟเวอร์เท่านั้น)
-   ```
-   YOUTUBE_API_KEY=...
-   ```
-
-โควตาฟรีวันละ 10,000 หน่วย อ่านเพลย์ลิสต์ 50 คลิปใช้ 1 หน่วย ค้นหาเพลย์ลิสต์ใช้ 100 หน่วยต่อครั้ง (ค้นได้ราว 100 ครั้งต่อวัน)
-
-### Deploy ขึ้น Vercel
-
-1. push โค้ดขึ้น GitHub
-2. ไปที่ vercel.com → Add New Project → เลือก repo
-3. ใส่ Environment Variables สองตัวของ Supabase เหมือนใน `.env.local`
-4. กด Deploy แล้วส่งลิงก์ให้เพื่อน
-
-## วิธีเล่น
-
-1. หัวห้องกด "สร้างห้องใหม่" แล้วส่งลิงก์หรือรหัส 5 ตัวให้เพื่อน
-2. หัวห้องเลือกแหล่งเพลง (ชาร์ตตอนนี้, ชุดเพลงที่คัดไว้, ศิลปินที่เลือกเอง, เพลย์ลิสต์ของฉัน, Spotify playlist หรือ YouTube playlist) แล้วเลือกจำนวนข้อ เวลาฟังก่อนตอบ (0/3/5 วิ) และเวลาตอบ แล้วกด "เริ่มเกม"
-3. ทุกเครื่องเล่นท่อนเดียวกัน ช่วงฟังก่อนตอบตัวเลือกจะยังไม่ขึ้น พอตัวเลือกขึ้นค่อยเริ่มจับเวลาตอบ ระบบจะเฉลยเมื่อทุกคนตอบครบหรือหมดเวลา
-4. ตัวเลือกแสดงแค่ชื่อเพลง ไม่บอกชื่อศิลปิน และพยายามใช้เพลงอื่นของศิลปินคนเดียวกันเป็นตัวหลอก ฟังเสียงนักร้องออกอย่างเดียวจึงยังไม่พอ ชื่อศิลปินจะขึ้นตอนเฉลย
-5. คะแนน = 500 ถ้าตอบถูก + สูงสุด 500 ตามความเร็ว + โบนัสตอบถูกติดกัน (+100 ต่อข้อ สูงสุด +300)
-
-เครื่องหัวห้องเป็นตัวเก็บเฉลยและนับคะแนน ถ้าหัวห้องรีเฟรช เกมจะกลับมาต่อจากข้อเดิม ถ้าหัวห้องหลุดเกิน 6 วินาที (ปิดแท็บ ล็อกจอ เน็ตหลุด) ผู้เล่นคนถัดไปจะได้เป็นหัวห้องแทนอัตโนมัติ เกมเดินต่อด้วยเพลงชุดเดิมและคะแนนเดิม ข้อที่กำลังเล่นอยู่จะเริ่มใหม่ ถ้าหัวห้องเดิมกลับมา จะเข้าเป็นผู้เล่นธรรมดา
-
-ห้องละไม่เกิน 30 คน (Supabase แพ็กเกจฟรีรองรับคนออนไลน์พร้อมกันทั้งเว็บประมาณ 200 คน)
-
-## โครงสร้างโค้ด
-
-| ไฟล์ | หน้าที่ |
-|---|---|
-| `src/lib/apple.ts` | ดึงชาร์ตไทยจาก Apple Music RSS และค้นเพลงด้วย iTunes API (storefront ไทย) |
-| `src/lib/presets.ts` | ชุดเพลงสำเร็จรูป (แก้หรือเพิ่มชุดได้ที่ไฟล์นี้) |
-| `src/lib/playlist.ts` | จับคู่เพลงจาก Spotify/YouTube กับตัวอย่างเพลงบน Apple Music |
-| `src/lib/spotify.ts` | ล็อกอิน Spotify ของหัวห้อง (PKCE ไม่ต้องใช้ secret) และอ่านเพลย์ลิสต์ |
-| `src/lib/youtube.ts` | อ่านเพลย์ลิสต์ YouTube ด้วย YouTube Data API |
-| `src/lib/music.ts` | กรองเวอร์ชัน Live/Acoustic/คาราโอเกะ ตัดเพลงซ้ำ สร้างคำถาม 4 ตัวเลือก คิดคะแนน |
-| `src/lib/host-engine.ts` | ลูปเกมของหัวห้อง: รับคำตอบ จับเวลา เฉลย ข้อต่อไป |
-| `src/lib/transport.ts` | ช่องสัญญาณ realtime: Supabase หรือ BroadcastChannel (โหมดทดสอบ) |
-| `src/lib/room.ts` | ตัวควบคุมห้อง: เข้าห้อง เลือกหัวห้องใหม่เมื่อหัวห้องหลุด รวบข้อความ realtime ก่อนส่ง |
-| `src/lib/deck.ts` | เข้ารหัสชุดคำถาม (AES-GCM) ให้ผู้เล่นทุกคนถือไว้ เปิดได้ที่เซิร์ฟเวอร์เท่านั้น ใช้ตอนย้ายหัวห้อง |
-| `src/lib/use-room.ts` | React hook เชื่อมหน้าเว็บกับห้อง |
-| `src/lib/audio.ts` | เล่นเสียงผ่าน Web Audio ปรับเสียงได้จริงทั้งคอมและ iPhone (ปุ่มเสียงไล่ระดับแบบหูคน) และปลดล็อกเสียงบนมือถือ |
-| `src/app/api/preview` | ส่งต่อไฟล์ตัวอย่างเพลงจาก Apple (รับเฉพาะโดเมนของ Apple) เพื่อให้ Web Audio อ่านไฟล์ได้ |
-| `src/app/api/questions` | API สร้างชุดคำถาม (เฉลยอยู่ที่หัวห้องเท่านั้น ไม่ส่งให้ผู้เล่น) |
-| `src/app/api/artists` | API แนะนำชื่อศิลปินตอนพิมพ์ค้นหา |
-
-## ทดสอบ
+With Docker:
 
 ```bash
-npm test                       # unit + integration tests (ไม่ต้องต่อเน็ต)
-MOCK_MUSIC=1 npm run dev       # เล่นด้วยเพลงปลอม ทดสอบระบบห้องโดยไม่เรียก Apple
+docker compose up --build                 # http://localhost:3000
+MOCK_MUSIC=1 docker compose up --build    # offline mock songs
 ```
 
-## ข้อจำกัดที่ควรรู้
+## Tests
 
-- **โหมด Spotify/YouTube ต้องจับคู่เพลงกับ Apple Music** เพราะตัวอย่างเสียงมาจาก Apple เพลงที่ Apple Music ไทยไม่มี หรือคลิปที่ไม่ใช่เพลง (vlog, cover) จะถูกข้ามและแจ้งเตือนในห้องรอ
+```bash
+npm test             # 50 unit and integration tests (node:test): music, scoring, host engine, rooms, failover
+npm run lint
+npm run typecheck
+npm run build
+npx playwright install chromium
+npm run test:e2e     # Playwright: two players play a full 5-round game to the final screen
+npm run screenshots  # regenerate docs/screenshots from mock mode
+```
 
-- **iTunes Search API จำกัดจำนวนครั้ง** (ประมาณ 20 ครั้งต่อนาทีต่อ IP) โหมดชาร์ตจะค้นเพลงอื่นของศิลปินในคำตอบเพิ่มสูงสุด 12 ครั้งต่อเกมเพื่อทำตัวหลอก โค้ดเก็บผลไว้ 1 ชั่วโมงเพื่อลดการเรียกซ้ำ ถ้าโดนจำกัด เกมยังเล่นได้ แต่ตัวหลอกของบางข้อจะเป็นเพลงจากศิลปินอื่นแทน
-- **เพลงบางเพลงไม่มีตัวอย่างให้ฟัง** หรือไม่มีใน Apple Music ไทย ถ้าศิลปินไหนหาไม่เจอ ระบบจะแจ้งเตือนในห้องรอ
-- **ผู้เล่นโกงได้ถ้าตั้งใจ** เพราะเวลาตอบวัดจากเครื่องผู้เล่น และลิงก์ตัวอย่างเพลงเปิดดูได้ในเครื่อง เหมาะกับเล่นกับเพื่อน ไม่เหมาะกับการแข่งชิงรางวัล
-- **ย้ายหัวห้องได้ แต่คำตอบข้อนั้นหาย** ข้อที่กำลังเล่นตอนหัวห้องหลุดจะเริ่มใหม่ ถ้าหัวห้องหลุดตอนเกมกำลังโหลดเพลง ห้องจะกลับไปหน้ารอ ส่วนโหมด Spotify ในห้องรอ หัวห้องคนใหม่ต้องเชื่อม Spotify ของตัวเองก่อนเริ่มรอบใหม่
-- **คนที่ตั้งใจโกงเปิดชุดคำถามได้** ถ้าดักข้อความ realtime แล้วส่งไปที่ `/api/deck` เอง ยอมแลกไว้เพื่อให้เกมไม่ล่มเวลาหัวห้องหลุด
-- ตัวอย่างเพลงเป็นของ Apple ใช้ได้ตามเงื่อนไขการโปรโมตของ Apple หน้าเฉลยมีลิงก์ "ฟังเต็มเพลงบน Apple Music" ไว้ให้แล้ว
+The e2e suite runs against `next start` with `MOCK_MUSIC=1` and no Supabase, so it needs
+no network or keys. The Playwright config starts the server itself.
+
+On Windows, Playwright can hang after the run while it shuts down the server. To avoid
+that, start the server yourself (`MOCK_MUSIC=1 npx next start -p 3200 -H 127.0.0.1`) and
+then run the tests. Playwright reuses an existing server outside CI.
+
+## CI/CD
+
+GitHub Actions (`.github/workflows/ci.yml`) runs on every push and pull request:
+
+1. **check:** lint, typecheck, unit tests and a production build.
+2. **e2e:** the Playwright tests against that build.
+3. **secret scan:** fails if any `.env` file is tracked, then runs gitleaks over the full history.
+
+Vercel deploys `main` through its Git integration, and every branch gets a preview deployment.
+
+## Configuration
+
+Set environment variables in Vercel, or in your shell when running locally. No env files
+are committed to this repo. Every variable is optional.
+
+| Variable | Used for |
+|---|---|
+| `NEXT_PUBLIC_SUPABASE_URL` | Supabase project URL. If empty, the game uses multi-tab test mode |
+| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | Supabase publishable key (or `NEXT_PUBLIC_SUPABASE_ANON_KEY` for legacy keys) |
+| `NEXT_PUBLIC_SPOTIFY_CLIENT_ID` | Turns on the Spotify playlist source. The redirect URI is `/spotify-callback` |
+| `YOUTUBE_API_KEY` | Turns on the YouTube playlist source (server-side only) |
+| `DECK_SECRET` | Key used to encrypt the failover deck. Set it in production |
+| `MOCK_MUSIC` | `1` uses made-up songs and generated tones (tests and offline use) |
+
+Supabase needs no tables, only Realtime. Make sure "private channels only" is turned off.
+Spotify apps in Development Mode can read only playlists the logged-in user owns or
+collaborates on, and only the host needs to log in.
+
+## Known limitations
+
+- Answer times are measured on each player's device, so a determined player can cheat.
+  The game is meant for friends, not prize contests.
+- The iTunes Search API is rate-limited (about 20 requests per minute per IP). Results are
+  cached for an hour. When the limit is hit, some wrong answers fall back to songs by other artists.
+- Spotify and YouTube tracks must be matched to Apple Music previews. Tracks that Apple
+  Music Thailand doesn't have are skipped, and the lobby shows a warning.
+- If the host drops mid-round, that round restarts under the new host.
+- Preview clips belong to Apple and are used under its promotional terms. The reveal screen links to the full song on Apple Music.
