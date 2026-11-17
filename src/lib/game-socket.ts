@@ -45,6 +45,7 @@ export class GameSocket {
   private pingTimer: unknown = null;
   private closed = false;
   private pendingSettings: GameSettings | null = null;
+  private freshConnection = false;
 
   constructor(o: { url: string; code: string; me: Member; create: boolean; WS?: typeof WebSocket; timers?: Timers }) {
     this.o = o;
@@ -82,6 +83,7 @@ export class GameSocket {
     ws.onopen = () => {
       if (this.ws !== ws) return;
       this.attempts = 0;
+      this.freshConnection = true; // the server may have restarted: its versions start over
       this.timers.clear(this.wakeTimer);
       this.set({ status: "ok" });
       this.ping();
@@ -146,7 +148,8 @@ export class GameSocket {
 
   private onState(s: GameState) {
     const cur = this.view.state;
-    if (cur && s.version <= cur.version && s.hostId === cur.hostId) return;
+    if (!this.freshConnection && cur && s.version <= cur.version && s.hostId === cur.hostId) return;
+    this.freshConnection = false;
     const pending = this.pendingSettings;
     if (pending) {
       if (s.phase !== "lobby" || sameSettings(s.settings, pending)) this.pendingSettings = null;

@@ -136,6 +136,19 @@ test("ignores older state versions", () => {
   assert.equal(last().status, "ok");
 });
 
+test("accepts a fresh state after reconnect even with a lower version (server restarted)", () => {
+  const { ws, last, timers } = setup();
+  ws().open();
+  ws().state(st(50));
+  ws().drop(1006);
+  timers.fire(500);
+  ws().open();
+  ws().state(st(1));
+  assert.equal(last().state?.version, 1, "new server's state replaces the old one");
+  ws().state(st(2));
+  assert.equal(last().state?.version, 2);
+});
+
 test("amHost follows hostId", () => {
   const { ws, last } = setup();
   ws().open();
