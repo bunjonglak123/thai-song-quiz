@@ -1,8 +1,10 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Avatar, Button, CHOICE_BG, CHOICE_MARKS, ColorPicker } from "@/components/ui";
+import { wakeServer } from "@/lib/leaderboard";
 import { markHost, newRoomCode, normalizeCode, PLAYER_COLORS, saveColor, savedColor, saveName, savedName } from "@/lib/identity";
 import { useMounted } from "@/lib/use-mounted";
 
@@ -16,6 +18,9 @@ function HomeForm() {
   const [color, setColor] = useState(savedColor);
   const [code, setCode] = useState("");
   const [nameError, setNameError] = useState(false);
+
+  // The game server sleeps when idle; wake it while the player types their name.
+  useEffect(() => wakeServer(), []);
 
   function requireName() {
     const n = name.trim();
@@ -62,6 +67,9 @@ function HomeForm() {
           <p className="mt-3 max-w-[32ch] text-lg text-muted lg:mt-6 lg:text-2xl lg:leading-relaxed">
             เปิดห้อง ส่งรหัสให้เพื่อน แล้วแข่งกันฟังท่อนสั้นๆ ใครรู้ก่อนได้คะแนนมากกว่า
           </p>
+          <Link href="/leaderboard" className="mt-4 inline-block text-kho underline underline-offset-4 lg:mt-6 lg:text-lg">
+            ดูอันดับคะแนนสูงสุด
+          </Link>
         </section>
 
         <section className="md:rounded-3xl md:bg-stage/60 md:p-8 lg:p-10">

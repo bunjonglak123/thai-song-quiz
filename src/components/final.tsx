@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import type { GameState } from "@/lib/types";
 import { Scoreboard } from "./play";
 import { Avatar, Button } from "./ui";
@@ -50,6 +51,9 @@ export function FinalView({
         ) : (
           <p className="text-center text-muted lg:text-left">รอหัวห้องเริ่มรอบใหม่</p>
         )}
+        <Link href="/leaderboard" target="_blank" className="mt-4 block text-center text-muted underline underline-offset-4 hover:text-ink lg:text-left">
+          ดูอันดับคะแนนสูงสุด
+        </Link>
       </div>
     </div>
   );
