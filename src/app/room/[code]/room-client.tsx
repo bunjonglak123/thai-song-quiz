@@ -9,7 +9,7 @@ import { QuestionView, RevealView, StandingsView } from "@/components/play";
 import { Avatar, Banner, Button, ColorPicker } from "@/components/ui";
 import { getSfxEnabled, getVolume, setSfxEnabled, setVolume, sfx, stopClip, unlockAudio } from "@/lib/audio";
 import { isHostOf, normalizeCode, PLAYER_COLORS, playerId, saveColor, savedColor, saveName, savedName } from "@/lib/identity";
-import type { Member } from "@/lib/transport";
+import type { Member } from "@/lib/types";
 import { useMounted } from "@/lib/use-mounted";
 import { useRoom } from "@/lib/use-room";
 
@@ -78,7 +78,7 @@ function Room({ code }: { code: string }) {
 }
 
 function Game({ code, me, isHost: isCreator }: { code: string; me: Member; isHost: boolean }) {
-  const { state, status, transportKind, answer, host, hostOnline, amHost, hostChange } = useRoom(code, me, isCreator);
+  const { state, status, configured, answer, host, hostOnline, amHost, hostChange } = useRoom(code, me, isCreator);
   // Host controls follow the role, which can move to another player mid-game.
   const isHost = amHost;
   const [hostMissing, setHostMissing] = useState(false);
@@ -110,12 +110,11 @@ function Game({ code, me, isHost: isCreator }: { code: string; me: Member; isHos
   return (
     <Shell volume>
       <div className="space-y-4 pb-2 lg:pb-4">
-        {transportKind === "local" && (
-          <Banner tone="warn">
-            โหมดทดสอบในเครื่อง: เล่นได้เฉพาะแท็บในเบราว์เซอร์นี้ ตั้งค่า Supabase ในไฟล์ .env.local เพื่อเล่นกับเพื่อนข้ามเครื่อง
-          </Banner>
+        {!configured && (
+          <Banner tone="warn">ยังไม่ได้ตั้งค่า NEXT_PUBLIC_GAME_SERVER_URL รันเซิร์ฟเวอร์เกมด้วย docker compose up</Banner>
         )}
-        {status === "error" && <Banner tone="error">เชื่อมต่อห้องไม่สำเร็จ ตรวจอินเทอร์เน็ตแล้วรีเฟรชหน้านี้</Banner>}
+        {status === "waking" && !state && <Banner tone="info">กำลังปลุกเซิร์ฟเวอร์ อาจใช้เวลาสักครู่…</Banner>}
+        {status === "error" && <Banner tone="error">เชื่อมต่อห้องไม่สำเร็จ ห้องอาจเต็ม หรือเปิดห้องนี้ไว้ในแท็บอื่น ลองรีเฟรชหน้านี้</Banner>}
         {status === "no-host" && !state && (
           <Banner tone="error">
             ไม่พบห้อง {code} ตรวจรหัสอีกครั้ง หรือรอให้หัวห้องเปิดหน้าเว็บค้างไว้{" "}
@@ -124,10 +123,10 @@ function Game({ code, me, isHost: isCreator }: { code: string; me: Member; isHos
             </Link>
           </Banner>
         )}
-        {hostMissing && <Banner tone="warn">หัวห้องหลุดการเชื่อมต่อ ถ้าไม่กลับมาในไม่กี่วินาที ระบบจะส่งต่อหัวห้องให้คนถัดไป</Banner>}
+        {hostMissing && <Banner tone="warn">หัวห้องหลุดการเชื่อมต่อ เกมยังเดินต่อ ถ้าไม่กลับมา ระบบจะส่งปุ่มควบคุมให้คนถัดไป</Banner>}
         {showChange && hostChange && !hostMissing && (
           <Banner tone="info">
-            {hostChange.me ? "หัวห้องเดิมหลุด ตอนนี้คุณเป็นหัวห้องแทน เกมเดินต่อจากเดิม" : `หัวห้องเดิมหลุด ตอนนี้ ${hostChange.name} เป็นหัวห้องแทน`}
+            {hostChange.me ? "หัวห้องเดิมหลุด ตอนนี้คุณควบคุมเกมแทน" : `หัวห้องเดิมหลุด ตอนนี้ ${hostChange.name} ควบคุมเกมแทน`}
           </Banner>
         )}
         {state?.phase === "final" && state.notice && <Banner tone="warn">{state.notice}</Banner>}

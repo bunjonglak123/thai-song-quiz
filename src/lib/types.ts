@@ -72,14 +72,11 @@ export type Reveal = {
 
 export type Phase = "lobby" | "loading" | "question" | "reveal" | "standings" | "final";
 
-/** The full game state the host broadcasts. Contains no future answers. */
+/** The full game state the game server sends. Contains no future answers. */
 export type GameState = {
   version: number;
-  /** Goes up by one each time the host role moves to another player. Higher epoch wins. */
-  epoch: number;
+  /** Who has the host controls (settings, start, skip). */
   hostId: string;
-  /** Id of the encrypted question deck for the current game (players keep it for a takeover). */
-  deckId?: string;
   phase: Phase;
   settings: GameSettings;
   players: Record<string, PlayerState>;
@@ -100,3 +97,6 @@ export type AnswerMsg = {
   choice: number;
   ms: number; // elapsed time measured on the player's device
 };
+
+/** A player in the room as the server knows them. */
+export type Member = { id: string; name: string; color?: string };

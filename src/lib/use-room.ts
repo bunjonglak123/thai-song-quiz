@@ -1,102 +1,84 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import { Room, type FetchedQuestions, type RoomView } from "./room";
+import { useEffect, useRef, useState } from "react";
+import { GAME_SERVER_URL, GameSocket, type ConnStatus, type SocketView } from "./game-socket";
 import { getPlaylistTracks } from "./spotify";
-import { createTransport, hasSupabase, type Member } from "./transport";
-import type { GameSettings, HostQuestion } from "./types";
+import type { GameSettings, GameState, Member } from "./types";
 
-export type { ConnStatus } from "./room";
+export type { ConnStatus } from "./game-socket";
 
-async function fetchQuestions(settings: GameSettings): Promise<FetchedQuestions> {
-  // Spotify only lets the logged-in host read their playlist, so the host's browser
-  // fetches the song list and sends it along.
+export type HostChange = { name: string; me: boolean; at: number };
+
+/** Asks Next.js for the sealed question deck. Spotify playlists are read here, with the host's login. */
+async function fetchDeck(settings: GameSettings): Promise<{ deck: string; warnings: string[] }> {
   const tracks = settings.source.kind === "spotify" ? await getPlaylistTracks(settings.source.playlistId) : undefined;
   const res = await fetch("/api/questions", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ ...settings, tracks }),
   });
-  const data = (await res.json().catch(() => ({}))) as Partial<FetchedQuestions> & { error?: string };
-  if (!res.ok || !data.questions) throw new Error(data.error || `โหลดเพลงไม่สำเร็จ (${res.status})`);
-  return { questions: data.questions, warnings: data.warnings ?? [], deck: data.deck, deckId: data.deckId };
+  const data = (await res.json().catch(() => ({}))) as { deck?: string; warnings?: string[]; error?: string };
+  if (!res.ok || !data.deck) throw new Error(data.error || `โหลดเพลงไม่สำเร็จ (${res.status})`);
+  return { deck: data.deck, warnings: data.warnings ?? [] };
 }
 
-async function openDeck(deck: string): Promise<HostQuestion[]> {
-  const res = await fetch("/api/deck", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ deck }),
-  });
-  const data = (await res.json().catch(() => ({}))) as { questions?: HostQuestion[] };
-  if (!res.ok || !data.questions) throw new Error("open deck failed");
-  return data.questions;
-}
-
-const sessionKV = {
-  get: (k: string) => {
-    try {
-      return sessionStorage.getItem(k);
-    } catch {
-      return null;
-    }
-  },
-  set: (k: string, v: string) => {
-    try {
-      sessionStorage.setItem(k, v);
-    } catch {}
-  },
-  remove: (k: string) => {
-    try {
-      sessionStorage.removeItem(k);
-    } catch {}
-  },
-};
-
-const EMPTY: RoomView = { state: null, members: [], status: "connecting", amHost: false, hostChange: null };
+const EMPTY: SocketView = { state: null, status: "connecting", amHost: false };
 
 export function useRoom(code: string, me: Member | null, isCreator: boolean) {
-  const [view, setView] = useState<RoomView>(EMPTY);
-  const roomRef = useRef<Room | null>(null);
+  const [view, setView] = useState<SocketView>(EMPTY);
+  const [hostChange, setHostChange] = useState<HostChange | null>(null);
+  const sockRef = useRef<GameSocket | null>(null);
   const meId = me?.id;
   const meName = me?.name;
   const meColor = me?.color;
 
   useEffect(() => {
-    if (!meId || !meName) return;
-    const member = { id: meId, name: meName, color: meColor };
-    const room = new Room({
-      code,
-      me: member,
-      isCreator,
-      transport: createTransport(code, member),
-      fetchQuestions,
-      openDeck,
-      storage: sessionKV,
+    if (!meId || !meName || !GAME_SERVER_URL) return;
+    const sock = new GameSocket({ url: GAME_SERVER_URL, code, me: { id: meId, name: meName, color: meColor }, create: isCreator });
+    sockRef.current = sock;
+    let prev: GameState | null = null;
+    const off = sock.subscribe((v) => {
+      const s = v.state;
+      if (prev && s && prev.hostId !== s.hostId) {
+        setHostChange({ name: s.players[s.hostId]?.name ?? "?", me: s.hostId === meId, at: Date.now() });
+      }
+      prev = s;
+      setView(v);
     });
-    roomRef.current = room;
-    const off = room.subscribe(setView);
-    void room.start();
+    sock.connect();
     return () => {
       off();
-      room.dispose();
-      roomRef.current = null;
+      sock.close();
+      sockRef.current = null;
       setView(EMPTY);
+      setHostChange(null);
     };
   }, [code, meId, meName, meColor, isCreator]);
 
-  const answer = useCallback((questionId: string, choice: number, ms: number) => roomRef.current?.answer(questionId, choice, ms), []);
+  const send = (type: string, data?: unknown) => sockRef.current?.send(type, data);
+  const answer = (questionId: string, choice: number, ms: number) => send("answer", { questionId, choice, ms });
 
   const host = {
-    updateSettings: (s: GameSettings) => roomRef.current?.host.updateSettings(s),
-    start: () => roomRef.current?.host.start(),
-    next: () => roomRef.current?.host.next(),
-    revealNow: () => roomRef.current?.host.revealNow(),
-    backToLobby: () => roomRef.current?.host.backToLobby(),
+    updateSettings: (s: GameSettings) => send("settings", s),
+    start: async () => {
+      const settings = view.state?.settings;
+      if (!settings) return;
+      send("loading");
+      try {
+        const { deck, warnings } = await fetchDeck(settings);
+        send("start", { deck, warnings });
+      } catch (e) {
+        send("loadFailed", { message: e instanceof Error ? e.message : "โหลดเพลงไม่สำเร็จ" });
+      }
+    },
+    next: () => send("next"),
+    revealNow: () => send("reveal"),
+    backToLobby: () => send("lobby"),
   };
 
-  const { state, members, status, amHost, hostChange } = view;
-  const hostOnline = !!state && (amHost || members.some((m) => m.id === state.hostId));
-  const transportKind: "supabase" | "local" = hasSupabase ? "supabase" : "local";
-  return { state, members, status, transportKind, answer, host, hostOnline, amHost, hostChange };
+  const { state, status, amHost } = view;
+  const members: Member[] = state ? Object.values(state.players).filter((p) => p.online).map((p) => ({ id: p.id, name: p.name, color: p.color })) : [];
+  const hostOnline = !!state && !!state.players[state.hostId]?.online;
+  const configured = Boolean(GAME_SERVER_URL);
+  return { state, members, status: status as ConnStatus, answer, host, hostOnline, amHost, hostChange, configured };
 }

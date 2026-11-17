@@ -2,7 +2,7 @@ import type { NextConfig } from "next";
 
 // Site-wide security headers. The CSP blocks framing (clickjacking), plugins and
 // <base> tricks. It does not restrict scripts or connections: Next.js inlines
-// scripts and the game talks to Spotify, Apple, YouTube and Supabase directly.
+// scripts and the game talks to Spotify, Apple, YouTube and the game server directly.
 const securityHeaders = [
   {
     key: "Content-Security-Policy",
