@@ -1,14 +1,13 @@
 # docker compose up --build  →  http://localhost:3000
-# With no Supabase values the game runs in multi-tab mode: open several tabs in one
-# browser, each tab is a player. Songs come from Apple Music previews (no key needed).
-# Set MOCK_MUSIC=1 to use made-up songs and generated tones instead (fully offline).
+# Runs the web app, the Go game server (../../../songquiz-server by default, or set
+# SONGQUIZ_SERVER_DIR) and Postgres for the leaderboard. Songs come from Apple Music
+# previews (no key needed). Set MOCK_MUSIC=1 for made-up songs and generated tones (offline).
 services:
   app:
     build:
       context: .
       args:
-        NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL:-}
-        NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY:-}
+        NEXT_PUBLIC_GAME_SERVER_URL: http://localhost:8080
         NEXT_PUBLIC_SPOTIFY_CLIENT_ID: ${NEXT_PUBLIC_SPOTIFY_CLIENT_ID:-}
     ports:
       - "3000:3000"
@@ -16,4 +15,35 @@ services:
       MOCK_MUSIC: ${MOCK_MUSIC:-}
       YOUTUBE_API_KEY: ${YOUTUBE_API_KEY:-}
       DECK_SECRET: ${DECK_SECRET:-}
+    depends_on:
+      - server
     restart: unless-stopped
+
+  server:
+    build: ${SONGQUIZ_SERVER_DIR:-../../../songquiz-server}
+    ports:
+      - "8080:8080"
+    environment:
+      DATABASE_URL: postgres://quiz:quiz@db:5432/quiz?sslmode=disable
+      ALLOWED_ORIGINS: localhost:3000
+      DECK_SECRET: ${DECK_SECRET:-}
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: quiz
+      POSTGRES_PASSWORD: quiz
+      POSTGRES_DB: quiz
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U quiz"]
+      interval: 2s
+      retries: 20
+
+volumes:
+  pgdata:

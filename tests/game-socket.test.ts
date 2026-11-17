@@ -163,6 +163,22 @@ test("send writes JSON frames only while open; pings every 20s", () => {
   assert.deepEqual(JSON.parse(ws().sent[1]), { type: "ping" });
 });
 
+test("settings show immediately and survive a stale server state", () => {
+  const { s, ws, last } = setup();
+  ws().open();
+  const base = { source: { kind: "chart", size: 100 }, rounds: 10, roundSeconds: 15, listenSeconds: 3 };
+  ws().state({ ...st(1), settings: base });
+  const five = { ...base, rounds: 5 };
+  s.updateSettings(five as never);
+  assert.equal(last().state?.settings.rounds, 5, "host sees the change at once");
+  assert.deepEqual(JSON.parse(ws().sent.at(-1)!), { type: "settings", data: five });
+  ws().state({ ...st(2), settings: base, answered: ["x"] }); // server hasn't applied it yet
+  assert.equal(last().state?.settings.rounds, 5, "a stale state doesn't undo it");
+  ws().state({ ...st(3), settings: five });
+  ws().state({ ...st(4), settings: { ...base, rounds: 7 } }); // another change confirmed later
+  assert.equal(last().state?.settings.rounds, 7, "once confirmed, the server is the source again");
+});
+
 test("close stops reconnecting", () => {
   const { s, ws, timers } = setup();
   s.close();

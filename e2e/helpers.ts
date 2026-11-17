@@ -13,7 +13,7 @@ export async function hostCreatesRoom(page: Page, name: string): Promise<string>
   return code;
 }
 
-/** A second tab in the same context joins by typing the code on the home page. */
+/** Another tab joins by typing the code on the home page (each tab is its own player). */
 export async function playerJoins(context: BrowserContext, code: string, name: string): Promise<Page> {
   const page = await context.newPage();
   await page.goto("/");
@@ -36,4 +36,17 @@ export async function answer(page: Page, index: number) {
   await expect(btn).toBeEnabled({ timeout: 30_000 });
   await btn.click();
   await expect(btn).toHaveAttribute("aria-pressed", "true");
+}
+
+/** Shortest game settings: 5 rounds, no listen delay. Host only. */
+export async function shortGame(host: Page) {
+  await host.getByLabel("5 ข้อ", { exact: true }).click();
+  await host.getByLabel("0 วิ", { exact: true }).click();
+}
+
+/** Records every WebSocket frame a page receives. Call before the page connects. */
+export function recordFrames(page: Page): string[] {
+  const frames: string[] = [];
+  page.on("websocket", (ws) => ws.on("framereceived", (f) => frames.push(String(f.payload))));
+  return frames;
 }

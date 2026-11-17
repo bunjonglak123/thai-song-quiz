@@ -1,7 +1,18 @@
 // Connection to the Go game server (songquiz-server). The server runs the game;
 // this client only sends intents and shows the state it receives.
 
-import type { GameState, Member } from "./types.ts";
+import type { GameSettings, GameState, Member } from "./types.ts";
+
+/** Settings compare by value; key order can differ after the round trip through Go. */
+function sameSettings(a: GameSettings, b: GameSettings) {
+  const norm = (v: unknown): unknown =>
+    v && typeof v === "object" && !Array.isArray(v)
+      ? Object.fromEntries(Object.entries(v as Record<string, unknown>).sort(([x], [y]) => x.localeCompare(y)).map(([k, x]) => [k, norm(x)]))
+      : Array.isArray(v)
+        ? v.map(norm)
+        : v;
+  return JSON.stringify(norm(a)) === JSON.stringify(norm(b));
+}
 
 export type ConnStatus = "connecting" | "waking" | "ok" | "error" | "no-host";
 
@@ -33,6 +44,7 @@ export class GameSocket {
   private wakeTimer: unknown = null;
   private pingTimer: unknown = null;
   private closed = false;
+  private pendingSettings: GameSettings | null = null;
 
   constructor(o: { url: string; code: string; me: Member; create: boolean; WS?: typeof WebSocket; timers?: Timers }) {
     this.o = o;
@@ -107,6 +119,16 @@ export class GameSocket {
     return true;
   }
 
+  /**
+   * Host settings change. Shown at once and kept over older server states until the
+   * server echoes it, so a second quick click builds on the first instead of undoing it.
+   */
+  updateSettings(s: GameSettings) {
+    if (!this.send("settings", s)) return;
+    this.pendingSettings = s;
+    if (this.view.state) this.set({ state: { ...this.view.state, settings: s } });
+  }
+
   close() {
     this.closed = true;
     this.timers.clear(this.retryTimer);
@@ -125,6 +147,11 @@ export class GameSocket {
   private onState(s: GameState) {
     const cur = this.view.state;
     if (cur && s.version <= cur.version && s.hostId === cur.hostId) return;
+    const pending = this.pendingSettings;
+    if (pending) {
+      if (s.phase !== "lobby" || sameSettings(s.settings, pending)) this.pendingSettings = null;
+      else s = { ...s, settings: pending };
+    }
     this.set({ state: s, status: "ok", amHost: s.hostId === this.o.me.id });
   }
 

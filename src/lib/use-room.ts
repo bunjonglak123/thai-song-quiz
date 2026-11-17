@@ -59,7 +59,7 @@ export function useRoom(code: string, me: Member | null, isCreator: boolean) {
   const answer = (questionId: string, choice: number, ms: number) => send("answer", { questionId, choice, ms });
 
   const host = {
-    updateSettings: (s: GameSettings) => send("settings", s),
+    updateSettings: (s: GameSettings) => sockRef.current?.updateSettings(s),
     start: async () => {
       const settings = view.state?.settings;
       if (!settings) return;
