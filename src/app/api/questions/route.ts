@@ -1,6 +1,6 @@
 import { getThaiChart, lookupTracks, mapLimit, searchArtistDecoys, searchArtistSongs, searchSongs } from "@/lib/apple";
 import { buildQuestions, pickAnswers, type PoolTrack, type WantedTrack } from "@/lib/music";
-import { sealDeck } from "@/lib/deck";
+import { deckResponse } from "@/lib/deck";
 import { mockPool } from "@/lib/mock";
 import { resolveTrackList, resolveYouTube } from "@/lib/playlist";
 import { presetById } from "@/lib/presets";
@@ -100,8 +100,7 @@ export async function POST(req: Request) {
   if (!built.questions.length) {
     return Response.json({ error: warnings.join(" · ") || "สร้างคำถามไม่สำเร็จ" }, { status: 422 });
   }
-  const { deck, deckId } = sealDeck(built.questions);
-  return Response.json({ questions: built.questions, warnings, poolSize: pool.length, deck, deckId });
+  return Response.json(deckResponse(built.questions, warnings, pool.length));
 }
 
 function mainArtist(artist: string) {
